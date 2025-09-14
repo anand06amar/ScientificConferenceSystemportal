@@ -127,7 +127,7 @@ const getCurrentHour = () => {
   return new Date().getHours();
 };
 
-// FIXED: Utility function to parse time consistently (preserves original grid behavior)
+// FIXED: Consistent datetime-local parsing without timezone conversion
 const parseTimeString = (timeStr: string) => {
   if (!timeStr) return { hours: 0, minutes: 0, date: new Date() };
 
@@ -136,7 +136,8 @@ const parseTimeString = (timeStr: string) => {
     if (
       timeStr.includes("T") &&
       !timeStr.includes("Z") &&
-      !timeStr.includes("+")
+      !timeStr.includes("+") &&
+      timeStr.length <= 19
     ) {
       const [datePart, timePart] = timeStr.split("T");
 
@@ -151,7 +152,7 @@ const parseTimeString = (timeStr: string) => {
       // Parse date part without timezone conversion
       const [yearStr, monthStr, dayStr] = datePart.split("-");
       const year = parseInt(yearStr ?? "0", 10);
-      const month = parseInt(monthStr ?? "0", 10) - 1;
+      const month = parseInt(monthStr ?? "0", 10) - 1; // Month is 0-indexed
       const day = parseInt(dayStr ?? "0", 10);
 
       const date = new Date(year, month, day);
@@ -175,16 +176,7 @@ const parseTimeString = (timeStr: string) => {
   return { hours: 0, minutes: 0, date: new Date() };
 };
 
-const createDateTimeLocal = (date: Date) => {
-  const year = date.getFullYear();
-  const month = (date.getMonth() + 1).toString().padStart(2, "0");
-  const day = date.getDate().toString().padStart(2, "0");
-  const hours = date.getHours().toString().padStart(2, "0");
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
-
-// FIXED: Function to format datetime-local input value
+// FIXED: Format datetime-local input value
 const formatDateTimeLocal = (dateStr: string) => {
   if (!dateStr) return "";
 
@@ -210,6 +202,16 @@ const formatDateTimeLocal = (dateStr: string) => {
   }
 
   return "";
+};
+
+// FIXED: Create datetime-local string from Date object
+const createDateTimeLocal = (date: Date) => {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, "0");
+  const day = date.getDate().toString().padStart(2, "0");
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
 // FIXED: Theme classes helper with proper light theme support
@@ -430,26 +432,20 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
     const body = draft[sessionId];
     if (!body) return;
 
-    // FIXED: Keep datetime-local format without converting to ISO
+    // FIXED: Validate using local time parsing
     if (body.startTime && body.endTime) {
-      const startHour = parseInt(
-        body.startTime.split("T")[1]?.split(":")[0] || "0"
-      );
-      const endHour = parseInt(
-        body.endTime.split("T")[1]?.split(":")[0] || "0"
-      );
+      const startTime = parseTimeString(body.startTime);
+      const endTime = parseTimeString(body.endTime);
 
-      if (endHour <= startHour) {
+      if (
+        endTime.hours < startTime.hours ||
+        (endTime.hours === startTime.hours &&
+          endTime.minutes <= startTime.minutes)
+      ) {
         alert("End time must be after start time");
         return;
       }
     }
-
-    const payload = {
-      ...body,
-      startTime: body.startTime,
-      endTime: body.endTime,
-    };
 
     setSaving((s) => ({ ...s, [sessionId]: true }));
 
@@ -457,7 +453,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
       const res = await fetch(`/api/sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
@@ -987,18 +983,9 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       const endDate = new Date(startDate);
       endDate.setHours(startDate.getHours() + 1, 0, 0, 0);
 
-      // FIXED: Format as datetime-local string without timezone conversion
-      const formatDateTime = (date: Date) => {
-        const year = date.getFullYear();
-        const month = (date.getMonth() + 1).toString().padStart(2, "0");
-        const day = date.getDate().toString().padStart(2, "0");
-        const hours = date.getHours().toString().padStart(2, "0");
-        const minutes = date.getMinutes().toString().padStart(2, "0");
-        return `${year}-${month}-${day}T${hours}:${minutes}`;
-      };
-
-      setStartDateTime(formatDateTime(startDate));
-      setEndDateTime(formatDateTime(endDate));
+      // FIXED: Use consistent datetime-local formatting
+      setStartDateTime(createDateTimeLocal(startDate));
+      setEndDateTime(createDateTimeLocal(endDate));
     }
   }, [isOpen, defaultDate, defaultHour]);
 
@@ -1053,12 +1040,12 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     setLoading(true);
 
     try {
-      // FIXED: Validate time using local time parsing
+      // FIXED: Validate time using consistent local time parsing
       const startTimeLocal = parseTimeString(startDateTime);
       const endTimeLocal = parseTimeString(endDateTime);
 
       if (
-        endTimeLocal.hours <= startTimeLocal.hours ||
+        endTimeLocal.hours < startTimeLocal.hours ||
         (endTimeLocal.hours === startTimeLocal.hours &&
           endTimeLocal.minutes <= startTimeLocal.minutes)
       ) {
@@ -1083,7 +1070,7 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       formData.append("roomId", roomId);
       formData.append("description", description);
 
-      // FIXED: Send datetime-local strings directly without conversion
+      // FIXED: Send datetime-local format to maintain consistency
       formData.append("startTime", startDateTime);
       formData.append("endTime", endDateTime);
 
@@ -1773,7 +1760,7 @@ const SessionsCalendarView: React.FC = () => {
     return days;
   }, [currentWeek]);
 
-  // FIXED: Get sessions for slot using local time parsing (like original)
+  // FIXED: Get sessions for slot using consistent time parsing
   const getSessionsForSlot = (date: Date, hour: number) => {
     return sessions.filter((session) => {
       if (!session.startTime || !session.endTime) return false;
@@ -1789,14 +1776,14 @@ const SessionsCalendarView: React.FC = () => {
     });
   };
 
-  // FIXED: Get session style using local time positioning (preserves grid behavior)
+  // FIXED: Get session style using consistent local time positioning
   const getSessionStyle = (session: Session) => {
     if (!session.startTime || !session.endTime) return {};
 
     const startTime = parseTimeString(session.startTime);
     const endTime = parseTimeString(session.endTime);
 
-    // Calculate position based on local time (like original)
+    // Calculate position based on local time
     const startPosition = (startTime.hours * 60 + startTime.minutes) / 60;
     const duration =
       (endTime.hours * 60 +
