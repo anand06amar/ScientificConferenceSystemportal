@@ -1,4 +1,4 @@
-// src/app/(dashboard)/organizer/sessions/page.tsx - IST TIMEZONE FIX (FINAL)
+// src/app/(dashboard)/organizer/sessions/page.tsx - IST TIMEZONE FIX
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
@@ -118,53 +118,64 @@ interface CreateSessionModalProps {
 }
 
 // ============================================================================
-// #region IST TIMEZONE HELPER FUNCTIONS (FINAL FIX - NO CONVERSION)
+// #region IST TIMEZONE HELPER FUNCTIONS (COMPLETE IST FIX)
 // ============================================================================
 
 /**
- * **CRITICAL FIX 1: From User Input (IST) to Database (IST)**
- * Store exactly what the user enters without any timezone conversion
+ * **KEY FIX 1: From User Input (IST) to Database (IST)**
+ * Converts a local time string from a 'datetime-local' input (IST)
+ * into an IST ISO string for database storage.
  */
 const convertLocalToIST = (localDateTimeString?: string): string | null => {
   if (!localDateTimeString) return null;
-  // Simply append seconds to make it a complete ISO string
-  // NO timezone conversion - store exactly what user entered
-  return `${localDateTimeString}:00`;
+  // Append seconds and the IST offset (+05:30) to the string.
+  const isoStringWithOffset = `${localDateTimeString}:00+05:30`;
+  const date = new Date(isoStringWithOffset);
+  return isValid(date) ? date.toISOString() : null;
 };
 
 /**
- * **CRITICAL FIX 2: From Database (IST) to User Input (Local)**
- * Display exactly what's stored without any timezone conversion
+ * **KEY FIX 2: From Database (IST) to User Input (Local)**
+ * Converts an IST ISO string (from the database) into the local time string
+ * format required by a 'datetime-local' input field.
  */
 const convertISTToInputFormat = (istISOString?: string): string => {
   if (!istISOString) return "";
-  // Simply remove the seconds part to match datetime-local format
-  // NO timezone conversion - display exactly what's stored
-  return istISOString.slice(0, 16);
+  const date = new Date(istISOString);
+  if (!isValid(date)) return "";
+
+  // Convert to IST
+  const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
+
+  const year = istDate.getUTCFullYear();
+  const month = (istDate.getUTCMonth() + 1).toString().padStart(2, "0");
+  const day = istDate.getUTCDate().toString().padStart(2, "0");
+  const hours = istDate.getUTCHours().toString().padStart(2, "0");
+  const minutes = istDate.getUTCMinutes().toString().padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
 /**
- * **CRITICAL FIX 3: For Display Logic**
- * Parse stored IST string without timezone conversion
+ * **KEY FIX 3: For Display Logic**
+ * Parses an IST ISO string from the database and returns its components
+ * in IST timezone. Used for positioning sessions on the calendar.
  */
 const parseISTTimeToLocal = (istISOString?: string) => {
   if (!istISOString) return { hours: 0, minutes: 0, date: new Date() };
+  const date = new Date(istISOString);
+  if (!isValid(date)) return { hours: 0, minutes: 0, date: new Date() };
 
-  // Parse the ISO string manually to avoid JavaScript Date timezone issues
-  const match = istISOString.match(
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/
-  );
-  if (!match) return { hours: 0, minutes: 0, date: new Date() };
-
-  const [, year, month, day, hours, minutes] = match;
+  // Convert to IST
+  const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
 
   return {
-    hours: parseInt(hours!, 10),
-    minutes: parseInt(minutes!, 10),
+    hours: istDate.getUTCHours(),
+    minutes: istDate.getUTCMinutes(),
     date: new Date(
-      parseInt(year!, 10),
-      parseInt(month!, 10) - 1,
-      parseInt(day!, 10)
+      istDate.getUTCFullYear(),
+      istDate.getUTCMonth(),
+      istDate.getUTCDate()
     ),
   };
 };
@@ -379,7 +390,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
 
     setSaving({ ...saving, [sessionId]: true });
 
-    // **CRITICAL FIX**: Convert local times from form to IST (no conversion, just format)
+    // **CRITICAL FIX**: Convert local times from form to IST before sending to API
     const payload = {
       ...body,
       startTime: convertLocalToIST(body.startTime),
@@ -787,18 +798,15 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
 
   useEffect(() => {
     if (isOpen && defaultDate && defaultHour !== undefined) {
-      // Format the default date and time for datetime-local input
-      const year = defaultDate.getFullYear();
-      const month = (defaultDate.getMonth() + 1).toString().padStart(2, "0");
-      const day = defaultDate.getDate().toString().padStart(2, "0");
-      const hours = defaultHour.toString().padStart(2, "0");
-      const endHours = (defaultHour + 1).toString().padStart(2, "0");
+      const startDate = new Date(defaultDate);
+      startDate.setHours(defaultHour, 0, 0, 0);
 
-      const startTimeString = `${year}-${month}-${day}T${hours}:00`;
-      const endTimeString = `${year}-${month}-${day}T${endHours}:00`;
+      const endDate = new Date(startDate);
+      endDate.setHours(startDate.getHours() + 1);
 
-      setStartDateTime(startTimeString);
-      setEndDateTime(endTimeString);
+      // **FIX**: Use the new converter to correctly set the initial IST time in the inputs
+      setStartDateTime(convertISTToInputFormat(startDate.toISOString()));
+      setEndDateTime(convertISTToInputFormat(endDate.toISOString()));
     }
   }, [isOpen, defaultDate, defaultHour]);
 
@@ -845,18 +853,15 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     setLoading(true);
 
     try {
-      // **CRITICAL FIX**: Convert local time strings from the form to IST (no conversion, just format)
+      // **CRITICAL FIX**: Convert local time strings from the form to IST before sending to the API
       const istStartTime = convertLocalToIST(startDateTime);
       const istEndTime = convertLocalToIST(endDateTime);
 
-      if (!istStartTime || !istEndTime) {
-        alert("Invalid time format.");
-        setLoading(false);
-        return;
-      }
-
-      // Simple validation - check if end time is after start time
-      if (endDateTime <= startDateTime) {
+      if (
+        !istStartTime ||
+        !istEndTime ||
+        new Date(istEndTime) <= new Date(istStartTime)
+      ) {
         alert("End time must be after start time.");
         setLoading(false);
         return;
@@ -875,7 +880,7 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       formData.append("travel", travelRequired);
       formData.append("accommodation", accommodationRequired);
 
-      // Send the IST times to the server
+      // Send the corrected IST times to the server
       formData.append("startTime", istStartTime);
       formData.append("endTime", istEndTime);
 
@@ -1555,7 +1560,7 @@ const SessionsCalendarView: React.FC = () => {
                 Sessions Calendar
               </h1>
               <p className={themeClasses.text.secondary}>
-                🇮🇳 IST timezone • Database-connected schedule • Last updated:{" "}
+                IST timezone • Database-connected schedule • Last updated:{" "}
                 {lastUpdateTime}
                 <span className={`${themeClasses.text.accent} ml-2`}>
                   • {events.length} events • {totalAvailableFaculty} faculty
