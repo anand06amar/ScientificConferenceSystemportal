@@ -132,30 +132,33 @@ const parseTimeString = (timeStr: string) => {
   if (!timeStr) return { hours: 0, minutes: 0, date: new Date() };
 
   try {
-    // Handle datetime-local format first (2023-09-05T16:30)
+    // Handle datetime-local format (YYYY-MM-DDTHH:mm) - NO timezone conversion
     if (
       timeStr.includes("T") &&
       !timeStr.includes("Z") &&
-      timeStr.length <= 19
+      !timeStr.includes("+")
     ) {
       const [datePart, timePart] = timeStr.split("T");
-      const [hoursStr, minutesStr = "0"] = (timePart || "").split(":");
+
+      if (!datePart || !timePart) {
+        return { hours: 0, minutes: 0, date: new Date() };
+      }
+
+      const [hoursStr, minutesStr = "0"] = timePart.split(":");
       const hours = parseInt(hoursStr ?? "0", 10);
       const minutes = parseInt(minutesStr ?? "0", 10);
 
-      // Create date from the date part only
-      if (!datePart) {
-        return { hours, minutes, date: new Date() };
-      }
-      const dateParts = datePart.split("-");
-      const year = parseInt(dateParts[0] ?? "0", 10);
-      const month = parseInt(dateParts[1] ?? "0", 10) - 1; // Month is 0-indexed
-      const day = parseInt(dateParts[2] ?? "0", 10);
-      const date = new Date(year, month, day);
+      // Parse date part without timezone conversion
+      const [yearStr, monthStr, dayStr] = datePart.split("-");
+      const year = parseInt(yearStr ?? "0", 10);
+      const month = parseInt(monthStr ?? "0", 10) - 1;
+      const day = parseInt(dayStr ?? "0", 10);
 
+      const date = new Date(year, month, day);
       return { hours, minutes, date };
-    } else {
-      // Handle ISO format but convert to local time for display
+    }
+    // Handle ISO format - convert to local time for display consistency
+    else if (timeStr.includes("T")) {
       const date = new Date(timeStr);
       if (isValid(date)) {
         return {
@@ -172,24 +175,34 @@ const parseTimeString = (timeStr: string) => {
   return { hours: 0, minutes: 0, date: new Date() };
 };
 
+const createDateTimeLocal = (date: Date) => {
+  const year = date.getFullYear();
+  const month = (date.getMonth() + 1).toString().padStart(2, "0");
+  const day = date.getDate().toString().padStart(2, "0");
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
 // FIXED: Function to format datetime-local input value
 const formatDateTimeLocal = (dateStr: string) => {
   if (!dateStr) return "";
 
   try {
-    // If already in datetime-local format, keep as-is
-    if (dateStr.includes("T") && !dateStr.includes("Z")) {
+    // If already in datetime-local format, return as-is
+    if (
+      dateStr.includes("T") &&
+      !dateStr.includes("Z") &&
+      !dateStr.includes("+") &&
+      dateStr.length <= 19
+    ) {
       return dateStr.length === 16 ? dateStr : dateStr.slice(0, 16);
-    } else {
-      // Convert from ISO to datetime-local
+    }
+    // Convert from ISO to datetime-local
+    else {
       const date = new Date(dateStr);
       if (isValid(date)) {
-        const year = date.getFullYear();
-        const month = (date.getMonth() + 1).toString().padStart(2, "0");
-        const day = date.getDate().toString().padStart(2, "0");
-        const hours = date.getHours().toString().padStart(2, "0");
-        const minutes = date.getMinutes().toString().padStart(2, "0");
-        return `${year}-${month}-${day}T${hours}:${minutes}`;
+        return createDateTimeLocal(date);
       }
     }
   } catch (error) {
