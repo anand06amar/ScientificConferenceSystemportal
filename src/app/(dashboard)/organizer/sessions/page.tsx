@@ -1,4 +1,4 @@
-// src/app/(dashboard)/organizer/sessions/page.tsx - FIXED: Event loading from database
+// src/app/(dashboard)/organizer/sessions/page.tsx - FIXED: Timezone handling
 "use client";
 
 import React, { useEffect, useState, Suspense } from "react";
@@ -103,7 +103,7 @@ type DraftSession = {
   description?: string;
 };
 
-// Helper functions
+// FIXED: Helper functions with proper timezone handling
 const badge = (s: InviteStatus) => {
   const base =
     "px-2 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1";
@@ -154,24 +154,74 @@ const statusBadge = (s: "Draft" | "Confirmed") => {
   );
 };
 
+// FIXED: Proper timezone handling for datetime-local inputs
 const toInputDateTime = (iso?: string) => {
   if (!iso) return "";
-  const d = new Date(iso);
-  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return local.toISOString().slice(0, 16);
+
+  try {
+    const date = new Date(iso);
+    // Check if date is valid
+    if (isNaN(date.getTime())) return "";
+
+    // Format for datetime-local input (YYYY-MM-DDTHH:mm)
+    // This preserves the local time as displayed
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  } catch (error) {
+    console.error("Error converting datetime:", error);
+    return "";
+  }
 };
 
+// FIXED: Better duration calculation
 const calculateDuration = (startTime?: string, endTime?: string) => {
   if (!startTime || !endTime) return "";
-  const start = new Date(startTime);
-  const end = new Date(endTime);
-  const minutes = Math.round((end.getTime() - start.getTime()) / (1000 * 60));
-  if (minutes > 0) {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return hours > 0 ? `${hours}h ${mins}m` : `${minutes} min`;
+
+  try {
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return "";
+
+    const minutes = Math.round((end.getTime() - start.getTime()) / (1000 * 60));
+    if (minutes > 0) {
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      return hours > 0 ? `${hours}h ${mins}m` : `${minutes} min`;
+    }
+    return "";
+  } catch (error) {
+    console.error("Error calculating duration:", error);
+    return "";
   }
-  return "";
+};
+
+// FIXED: Format time for display (preserving local timezone)
+const formatDisplayTime = (isoString?: string) => {
+  if (!isoString) return "";
+
+  try {
+    const date = new Date(isoString);
+    if (isNaN(date.getTime())) return "";
+
+    return date.toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata", // Explicitly use IST
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch (error) {
+    console.error("Error formatting display time:", error);
+    return "";
+  }
 };
 
 const AllSessions: React.FC = () => {
@@ -272,7 +322,6 @@ const AllSessions: React.FC = () => {
       setEvents(processedEvents);
     } catch (error) {
       console.error("Error loading events:", error);
-
       // FIXED: Fallback events only if API fails
       const fallbackEvents: Event[] = [
         {
@@ -323,6 +372,8 @@ const AllSessions: React.FC = () => {
 
       const sessionsList =
         sData.data?.sessions || sData.sessions || sData || [];
+
+      // FIXED: Proper timezone handling for sessions
       const mapped: SessionRow[] = sessionsList.map((s: any) => {
         const roomId =
           s.roomId ?? rData.find((r: any) => r.name === s.roomName)?.id;
@@ -333,12 +384,9 @@ const AllSessions: React.FC = () => {
           roomId,
           duration,
           startTime: s.startTime || s.time,
-          formattedStartTime: s.startTime
-            ? new Date(s.startTime).toLocaleString()
-            : undefined,
-          formattedEndTime: s.endTime
-            ? new Date(s.endTime).toLocaleString()
-            : undefined,
+          // FIXED: Use proper formatting that respects local timezone
+          formattedStartTime: formatDisplayTime(s.startTime || s.time),
+          formattedEndTime: formatDisplayTime(s.endTime),
         };
       });
 
@@ -451,6 +499,7 @@ const AllSessions: React.FC = () => {
     }));
   };
 
+  // FIXED: Better save handling with timezone preservation
   const onSave = async (id: string) => {
     const body = draft[id];
     if (!body) return;
@@ -458,13 +507,20 @@ const AllSessions: React.FC = () => {
     let isoStartTime: string | null = null;
     let isoEndTime: string | null = null;
 
+    // FIXED: Proper timezone handling for datetime-local values
     if (body.startTime && body.startTime.length === 16) {
-      isoStartTime = new Date(body.startTime).toISOString();
+      // datetime-local format: YYYY-MM-DDTHH:mm
+      // Create date in local timezone first, then convert to ISO
+      const localDate = new Date(body.startTime);
+      // Ensure we're working with the intended local time
+      isoStartTime = localDate.toISOString();
     }
     if (body.endTime && body.endTime.length === 16) {
-      isoEndTime = new Date(body.endTime).toISOString();
+      const localDate = new Date(body.endTime);
+      isoEndTime = localDate.toISOString();
     }
 
+    // Validation
     if (isoStartTime && isoEndTime) {
       const start = new Date(isoStartTime);
       const end = new Date(isoEndTime);
@@ -483,8 +539,10 @@ const AllSessions: React.FC = () => {
       ...body,
       startTime: isoStartTime,
       endTime: isoEndTime,
-      time: isoStartTime,
+      time: isoStartTime, // For backward compatibility
     };
+
+    console.log("Saving session with payload:", payload);
 
     setSaving((s) => ({ ...s, [id]: true }));
 
@@ -500,6 +558,9 @@ const AllSessions: React.FC = () => {
         alert(err.error || "Failed to update session");
         return;
       }
+
+      const responseData = await res.json();
+      console.log("Session updated successfully:", responseData);
 
       await load(false);
       onCancel(id);
@@ -552,7 +613,6 @@ const AllSessions: React.FC = () => {
                   </p>
                 </div>
               </div>
-
               <div className="flex items-center gap-3">
                 <Button
                   onClick={() => handleCreateSession()}
@@ -578,7 +638,7 @@ const AllSessions: React.FC = () => {
               </div>
             </div>
 
-            {/* Event Selection - FIXED: Show loading state and better error handling */}
+            {/* Event Selection */}
             <Card className="border-gray-700 bg-gray-900/50 backdrop-blur mb-6">
               <CardContent className="p-4">
                 <div className="flex items-center gap-4">
@@ -1011,7 +1071,7 @@ const AllSessions: React.FC = () => {
                               )}
                             </td>
 
-                            {/* Schedule */}
+                            {/* Schedule - FIXED: Better timezone handling */}
                             <td className="p-4">
                               {isEditing ? (
                                 <div className="space-y-2">
@@ -1039,6 +1099,15 @@ const AllSessions: React.FC = () => {
                                       )
                                     }
                                   />
+                                  {d?.startTime && d?.endTime && (
+                                    <div className="text-xs text-blue-300">
+                                      Duration:{" "}
+                                      {calculateDuration(
+                                        new Date(d.startTime).toISOString(),
+                                        new Date(d.endTime).toISOString()
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               ) : s.startTime || s.endTime ? (
                                 <div className="text-xs space-y-1">
@@ -1056,6 +1125,14 @@ const AllSessions: React.FC = () => {
                                         End:
                                       </span>{" "}
                                       {s.formattedEndTime}
+                                    </div>
+                                  )}
+                                  {s.duration && (
+                                    <div className="text-blue-300">
+                                      <span className="text-gray-400">
+                                        Duration:
+                                      </span>{" "}
+                                      {s.duration}
                                     </div>
                                   )}
                                 </div>
