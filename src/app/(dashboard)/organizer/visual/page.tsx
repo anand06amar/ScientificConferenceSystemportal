@@ -1,4 +1,4 @@
-// src/app/(dashboard)/organizer/sessions/page.tsx - FINAL & COMPLETE TIMEZONE FIX
+// src/app/(dashboard)/organizer/sessions/page.tsx - IST ONLY VERSION
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
@@ -42,8 +42,8 @@ export interface Session {
   roomId: string;
   roomName?: string;
   description?: string;
-  startTime: string; // Stored as UTC ISO String
-  endTime: string; // Stored as UTC ISO String
+  startTime: string; // Stored as IST datetime-local string
+  endTime: string; // Stored as IST datetime-local string
   status: "Draft" | "Confirmed";
   inviteStatus: "Pending" | "Accepted" | "Declined";
   rejectionReason?: "NotInterested" | "SuggestedTopic" | "TimeConflict";
@@ -118,55 +118,100 @@ interface CreateSessionModalProps {
 }
 
 // ============================================================================
-// #region ROBUST TIMEZONE HELPER FUNCTIONS (THE COMPLETE FIX)
+// #region SIMPLIFIED IST-ONLY HELPER FUNCTIONS
 // ============================================================================
 
 /**
- * **KEY FIX 1: From User Input (IST) to Database (UTC)**
- * Converts a local time string from a 'datetime-local' input (assumed to be IST)
- * into a proper UTC ISO string for database storage.
+ * **SIMPLIFIED**: Parse IST datetime-local string to get hours, minutes, and date
+ * Since everything is stored in IST, no timezone conversion needed!
  */
-const convertLocalToUTC = (localDateTimeString?: string): string | null => {
-  if (!localDateTimeString) return null;
-  // Append seconds and the IST offset (+05:30) to the string.
-  const isoStringWithOffset = `${localDateTimeString}:00+05:30`;
-  const date = new Date(isoStringWithOffset);
-  return isValid(date) ? date.toISOString() : null;
+const parseISTTime = (istDateTimeString?: string) => {
+  if (!istDateTimeString) return { hours: 0, minutes: 0, date: new Date() };
+
+  try {
+    // Handle datetime-local format (YYYY-MM-DDTHH:mm) directly
+    if (istDateTimeString.includes("T") && istDateTimeString.length <= 19) {
+      const [datePart, timePart] = istDateTimeString.split("T");
+      if (!datePart || !timePart) {
+        return { hours: 0, minutes: 0, date: new Date() };
+      }
+
+      const [hoursStr, minutesStr = "0"] = timePart.split(":");
+      const hours = parseInt(hoursStr ?? "0", 10);
+      const minutes = parseInt(minutesStr ?? "0", 10);
+
+      const [yearStr, monthStr, dayStr] = datePart.split("-");
+      const year = parseInt(yearStr ?? "0", 10);
+      const month = parseInt(monthStr ?? "0", 10) - 1; // Month is 0-indexed
+      const day = parseInt(dayStr ?? "0", 10);
+
+      const date = new Date(year, month, day);
+      return { hours, minutes, date };
+    }
+
+    // If it's already a proper ISO string, parse it normally
+    const date = new Date(istDateTimeString);
+    if (isValid(date)) {
+      return {
+        hours: date.getHours(),
+        minutes: date.getMinutes(),
+        date: new Date(date.getFullYear(), date.getMonth(), date.getDate()),
+      };
+    }
+  } catch (error) {
+    console.warn("Error parsing IST time:", istDateTimeString, error);
+  }
+
+  return { hours: 0, minutes: 0, date: new Date() };
 };
 
 /**
- * **KEY FIX 2: From Database (UTC) to User Input (Local)**
- * Converts a UTC ISO string (from the database) into the local time string
- * format required by a 'datetime-local' input field.
+ * **SIMPLIFIED**: Format datetime-local string for input fields
+ * Since we store in IST format, just ensure proper formatting
  */
-const convertUTCToInputFormat = (utcISOString?: string): string => {
-  if (!utcISOString) return "";
-  const date = new Date(utcISOString);
-  if (!isValid(date)) return "";
+const formatDateTimeLocalIST = (dateTimeString?: string): string => {
+  if (!dateTimeString) return "";
 
+  try {
+    // If already in datetime-local format, return as-is (with proper length)
+    if (
+      dateTimeString.includes("T") &&
+      !dateTimeString.includes("Z") &&
+      !dateTimeString.includes("+") &&
+      dateTimeString.length <= 19
+    ) {
+      return dateTimeString.length === 16
+        ? dateTimeString
+        : dateTimeString.slice(0, 16);
+    }
+
+    // If it's an ISO string, convert to datetime-local format
+    const date = new Date(dateTimeString);
+    if (isValid(date)) {
+      const year = date.getFullYear();
+      const month = (date.getMonth() + 1).toString().padStart(2, "0");
+      const day = date.getDate().toString().padStart(2, "0");
+      const hours = date.getHours().toString().padStart(2, "0");
+      const minutes = date.getMinutes().toString().padStart(2, "0");
+      return `${year}-${month}-${day}T${hours}:${minutes}`;
+    }
+  } catch (error) {
+    console.warn("Error formatting datetime local IST:", dateTimeString, error);
+  }
+
+  return "";
+};
+
+/**
+ * **SIMPLIFIED**: Create datetime-local string from Date object in IST
+ */
+const createDateTimeLocalIST = (date: Date): string => {
   const year = date.getFullYear();
   const month = (date.getMonth() + 1).toString().padStart(2, "0");
   const day = date.getDate().toString().padStart(2, "0");
   const hours = date.getHours().toString().padStart(2, "0");
   const minutes = date.getMinutes().toString().padStart(2, "0");
-
   return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
-
-/**
- * **KEY FIX 3: For Display Logic**
- * Parses a UTC ISO string from the database and returns its components
- * in the browser's local timezone. Used for positioning sessions on the calendar.
- */
-const parseUTCTimeToLocal = (utcISOString?: string) => {
-  if (!utcISOString) return { hours: 0, minutes: 0, date: new Date() };
-  const date = new Date(utcISOString);
-  if (!isValid(date)) return { hours: 0, minutes: 0, date: new Date() };
-  return {
-    hours: date.getHours(),
-    minutes: date.getMinutes(),
-    date: new Date(date.getFullYear(), date.getMonth(), date.getDate()),
-  };
 };
 
 // #endregion
@@ -346,9 +391,9 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
         title: session.title,
         place: session.place,
         roomId: session.roomId,
-        // **FIX**: Use new converter to correctly populate edit form with local time
-        startTime: convertUTCToInputFormat(session.startTime),
-        endTime: convertUTCToInputFormat(session.endTime),
+        // **SIMPLIFIED**: Just format the IST string for input
+        startTime: formatDateTimeLocalIST(session.startTime),
+        endTime: formatDateTimeLocalIST(session.endTime),
         status: session.status,
         description: session.description,
       },
@@ -377,26 +422,29 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
     const body = draft[sessionId];
     if (!body) return;
 
-    setSaving({ ...saving, [sessionId]: true });
+    // **SIMPLIFIED**: Validate using IST time parsing (no conversion needed!)
+    if (body.startTime && body.endTime) {
+      const startTime = parseISTTime(body.startTime);
+      const endTime = parseISTTime(body.endTime);
 
-    // **CRITICAL FIX**: Convert local times from form back to UTC before sending to API
-    const payload = {
-      ...body,
-      startTime: convertLocalToUTC(body.startTime),
-      endTime: convertLocalToUTC(body.endTime),
-    };
-
-    if (!payload.startTime || !payload.endTime) {
-      alert("Invalid start or end time format.");
-      setSaving({ ...saving, [sessionId]: false });
-      return;
+      if (
+        endTime.hours < startTime.hours ||
+        (endTime.hours === startTime.hours &&
+          endTime.minutes <= startTime.minutes)
+      ) {
+        alert("End time must be after start time");
+        return;
+      }
     }
 
+    setSaving({ ...saving, [sessionId]: true });
+
     try {
+      // **SIMPLIFIED**: Send IST times directly to API (no UTC conversion!)
       const res = await fetch(`/api/sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body), // Send IST times as-is
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -699,19 +747,19 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
                       <div className="flex items-center gap-3">
                         <Clock className="w-4 h-4 text-purple-400" />
                         <span>
-                          {parseUTCTimeToLocal(session.startTime)
+                          {parseISTTime(session.startTime)
                             .hours.toString()
                             .padStart(2, "0")}
                           :
-                          {parseUTCTimeToLocal(session.startTime)
+                          {parseISTTime(session.startTime)
                             .minutes.toString()
                             .padStart(2, "0")}{" "}
                           -{" "}
-                          {parseUTCTimeToLocal(session.endTime)
+                          {parseISTTime(session.endTime)
                             .hours.toString()
                             .padStart(2, "0")}
                           :
-                          {parseUTCTimeToLocal(session.endTime)
+                          {parseISTTime(session.endTime)
                             .minutes.toString()
                             .padStart(2, "0")}
                         </span>
@@ -792,9 +840,9 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       const endDate = new Date(startDate);
       endDate.setHours(startDate.getHours() + 1);
 
-      // **FIX**: Use the new converter to correctly set the initial local time in the inputs
-      setStartDateTime(convertUTCToInputFormat(startDate.toISOString()));
-      setEndDateTime(convertUTCToInputFormat(endDate.toISOString()));
+      // **SIMPLIFIED**: Just create IST datetime-local strings
+      setStartDateTime(createDateTimeLocalIST(startDate));
+      setEndDateTime(createDateTimeLocalIST(endDate));
     }
   }, [isOpen, defaultDate, defaultHour]);
 
@@ -841,16 +889,26 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     setLoading(true);
 
     try {
-      // **CRITICAL FIX**: Convert local time strings from the form to UTC before sending to the API
-      const utcStartTime = convertLocalToUTC(startDateTime);
-      const utcEndTime = convertLocalToUTC(endDateTime);
+      // **SIMPLIFIED**: Validate using IST time parsing (no conversion needed!)
+      const startTimeLocal = parseISTTime(startDateTime);
+      const endTimeLocal = parseISTTime(endDateTime);
 
       if (
-        !utcStartTime ||
-        !utcEndTime ||
-        new Date(utcEndTime) <= new Date(utcStartTime)
+        endTimeLocal.hours < startTimeLocal.hours ||
+        (endTimeLocal.hours === startTimeLocal.hours &&
+          endTimeLocal.minutes <= startTimeLocal.minutes)
       ) {
-        alert("End time must be after start time.");
+        alert("End time must be after start time");
+        setLoading(false);
+        return;
+      }
+
+      const durationMinutes =
+        endTimeLocal.hours * 60 +
+        endTimeLocal.minutes -
+        (startTimeLocal.hours * 60 + startTimeLocal.minutes);
+      if (durationMinutes < 15) {
+        alert("Session must be at least 15 minutes long");
         setLoading(false);
         return;
       }
@@ -868,9 +926,16 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       formData.append("travel", travelRequired);
       formData.append("accommodation", accommodationRequired);
 
-      // Send the corrected, reliable UTC times to the server
-      formData.append("startTime", utcStartTime);
-      formData.append("endTime", utcEndTime);
+      // **SIMPLIFIED**: Send IST times directly to server (no UTC conversion!)
+      formData.append("startTime", startDateTime);
+      formData.append("endTime", endDateTime);
+
+      console.log("📋 Creating session with IST times:", {
+        startTime: startDateTime,
+        endTime: endDateTime,
+        startHour: startTimeLocal.hours,
+        endHour: endTimeLocal.hours,
+      });
 
       const response = await fetch("/api/sessions", {
         method: "POST",
@@ -881,6 +946,9 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
         const errorData = await response.json();
         throw new Error(errorData.error || "Failed to create session");
       }
+
+      const result = await response.json();
+      console.log("✅ Session created successfully in IST:", result);
 
       resetForm();
       onCreate();
@@ -1374,11 +1442,11 @@ const SessionsCalendarView: React.FC = () => {
     }).filter((day) => !isDateInPast(day.date) || day.isToday);
   }, [currentWeek]);
 
-  // **FIX**: Use the new `parseUTCTimeToLocal` function for filtering sessions
+  // **SIMPLIFIED**: Use IST time parsing for filtering sessions
   const getSessionsForSlot = (date: Date, hour: number) => {
     return sessions.filter((session) => {
-      const sessionStartTime = parseUTCTimeToLocal(session.startTime);
-      const sessionEndTime = parseUTCTimeToLocal(session.endTime);
+      const sessionStartTime = parseISTTime(session.startTime);
+      const sessionEndTime = parseISTTime(session.endTime);
       return (
         isSameDay(sessionStartTime.date, date) &&
         hour >= sessionStartTime.hours &&
@@ -1387,10 +1455,10 @@ const SessionsCalendarView: React.FC = () => {
     });
   };
 
-  // **FIX**: Use `parseUTCTimeToLocal` for calculating session position and duration
+  // **SIMPLIFIED**: Use IST time parsing for calculating session position and duration
   const getSessionStyle = (session: Session) => {
-    const startTime = parseUTCTimeToLocal(session.startTime);
-    const endTime = parseUTCTimeToLocal(session.endTime);
+    const startTime = parseISTTime(session.startTime);
+    const endTime = parseISTTime(session.endTime);
 
     const startInMinutes = startTime.hours * 60 + startTime.minutes;
     const endInMinutes = endTime.hours * 60 + endTime.minutes;
@@ -1446,17 +1514,15 @@ const SessionsCalendarView: React.FC = () => {
   };
 
   const handleSessionClick = (session: Session) => {
-    const sessionTime = parseUTCTimeToLocal(session.startTime);
+    const sessionTime = parseISTTime(session.startTime);
     setSelectedSessions([session]);
     setSelectedDate(format(sessionTime.date, "EEEE, MMMM d, yyyy"));
     setSelectedTimeSlot(
       `${sessionTime.hours}:${sessionTime.minutes
         .toString()
         .padStart(2, "0")} - ${
-        parseUTCTimeToLocal(session.endTime).hours
-      }:${parseUTCTimeToLocal(session.endTime)
-        .minutes.toString()
-        .padStart(2, "0")}`
+        parseISTTime(session.endTime).hours
+      }:${parseISTTime(session.endTime).minutes.toString().padStart(2, "0")}`
     );
     setIsModalOpen(true);
   };
@@ -1548,7 +1614,7 @@ const SessionsCalendarView: React.FC = () => {
                 Sessions Calendar
               </h1>
               <p className={themeClasses.text.secondary}>
-                Database-connected schedule • Last updated: {lastUpdateTime}
+                IST-only schedule • Last updated: {lastUpdateTime}
                 <span className={`${themeClasses.text.accent} ml-2`}>
                   • {events.length} events • {totalAvailableFaculty} faculty
                   available
@@ -1742,17 +1808,13 @@ const SessionsCalendarView: React.FC = () => {
                   {sessions
                     .filter((session) => {
                       if (!session.startTime) return false;
-                      const sessionTime = parseUTCTimeToLocal(
-                        session.startTime
-                      );
+                      const sessionTime = parseISTTime(session.startTime);
                       return isSameDay(sessionTime.date, day.date);
                     })
                     .map((session) => {
                       const style = getSessionStyle(session);
                       const colorClass = getSessionColor(session);
-                      const sessionTime = parseUTCTimeToLocal(
-                        session.startTime
-                      );
+                      const sessionTime = parseISTTime(session.startTime);
                       const isPastSession = isTimeSlotInPast(
                         sessionTime.date,
                         sessionTime.hours
