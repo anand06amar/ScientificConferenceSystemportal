@@ -1,4 +1,4 @@
-// src/app/(dashboard)/organizer/sessions/page.tsx - IST ONLY, no UTC, no shifts
+// src/app/(dashboard)/organizer/sessions/page.tsx - IST TIMEZONE FIX
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
@@ -42,9 +42,8 @@ export interface Session {
   roomId: string;
   roomName?: string;
   description?: string;
-  // Store EXACT local IST string from <input type="datetime-local"> like "2025-09-15T00:00"
-  startTime: string;
-  endTime: string;
+  startTime: string; // Stored as IST ISO String
+  endTime: string; // Stored as IST ISO String
   status: "Draft" | "Confirmed";
   inviteStatus: "Pending" | "Accepted" | "Declined";
   rejectionReason?: "NotInterested" | "SuggestedTopic" | "TimeConflict";
@@ -87,8 +86,8 @@ type DraftSession = {
   title?: string;
   place: string;
   roomId?: string;
-  startTime?: string; // "YYYY-MM-DDTHH:mm"
-  endTime?: string; // "YYYY-MM-DDTHH:mm"
+  startTime?: string;
+  endTime?: string;
   status: "Draft" | "Confirmed";
   description?: string;
 };
@@ -119,50 +118,70 @@ interface CreateSessionModalProps {
 }
 
 // ============================================================================
-// Helpers: keep everything local, no timezone math
+// #region IST TIMEZONE HELPER FUNCTIONS (COMPLETE IST FIX)
 // ============================================================================
 
-// Build a datetime-local value string from a Date using local clock (no toISOString)
-const toInputLocalString = (d?: Date): string => {
-  if (!d || !isValid(d)) return "";
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${y}-${m}-${day}T${hh}:${mm}`;
+/**
+ * **KEY FIX 1: From User Input (IST) to Database (IST)**
+ * Converts a local time string from a 'datetime-local' input (IST)
+ * into an IST ISO string for database storage.
+ */
+const convertLocalToIST = (localDateTimeString?: string): string | null => {
+  if (!localDateTimeString) return null;
+  // Append seconds and the IST offset (+05:30) to the string.
+  const isoStringWithOffset = `${localDateTimeString}:00+05:30`;
+  const date = new Date(isoStringWithOffset);
+  return isValid(date) ? date.toISOString() : null;
 };
 
-// Strictly parse "YYYY-MM-DDTHH:mm" (or with seconds) and construct a local Date with components
-const parseLocalPartsToDate = (localDateTime?: string): Date | null => {
-  if (!localDateTime) return null;
-  const cleaned = localDateTime.trim();
-  // Accept "YYYY-MM-DDTHH:mm" or "YYYY-MM-DDTHH:mm:ss"
-  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(
-    cleaned
-  );
-  if (!m) return null;
-  const [, ys, ms, ds, hs, mins, ss] = m;
-  const y = Number(ys);
-  const mo = Number(ms);
-  const d = Number(ds);
-  const h = Number(hs);
-  const mi = Number(mins);
-  const s = ss ? Number(ss) : 0;
-  const dt = new Date(y, mo - 1, d, h, mi, s, 0); // local date, no offset applied
-  return isValid(dt) ? dt : null;
+/**
+ * **KEY FIX 2: From Database (IST) to User Input (Local)**
+ * Converts an IST ISO string (from the database) into the local time string
+ * format required by a 'datetime-local' input field.
+ */
+const convertISTToInputFormat = (istISOString?: string): string => {
+  if (!istISOString) return "";
+  const date = new Date(istISOString);
+  if (!isValid(date)) return "";
+
+  // Convert to IST
+  const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
+
+  const year = istDate.getUTCFullYear();
+  const month = (istDate.getUTCMonth() + 1).toString().padStart(2, "0");
+  const day = istDate.getUTCDate().toString().padStart(2, "0");
+  const hours = istDate.getUTCHours().toString().padStart(2, "0");
+  const minutes = istDate.getUTCMinutes().toString().padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
-// Extract local H, m, and date bucket for grid placement from a datetime-local string
-const decomposeLocalTime = (localDateTime?: string) => {
-  const dt = parseLocalPartsToDate(localDateTime);
-  if (!dt) return { hours: 0, minutes: 0, date: new Date() };
+/**
+ * **KEY FIX 3: For Display Logic**
+ * Parses an IST ISO string from the database and returns its components
+ * in IST timezone. Used for positioning sessions on the calendar.
+ */
+const parseISTTimeToLocal = (istISOString?: string) => {
+  if (!istISOString) return { hours: 0, minutes: 0, date: new Date() };
+  const date = new Date(istISOString);
+  if (!isValid(date)) return { hours: 0, minutes: 0, date: new Date() };
+
+  // Convert to IST
+  const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
+
   return {
-    hours: dt.getHours(),
-    minutes: dt.getMinutes(),
-    date: new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()),
+    hours: istDate.getUTCHours(),
+    minutes: istDate.getUTCMinutes(),
+    date: new Date(
+      istDate.getUTCFullYear(),
+      istDate.getUTCMonth(),
+      istDate.getUTCDate()
+    ),
   };
 };
+
+// #endregion
+// ============================================================================
 
 // --- Other Helper Functions ---
 const isDateInPast = (date: Date) =>
@@ -174,7 +193,6 @@ const isTimeSlotInPast = (date: Date, hour: number) => {
   return slotDate < now;
 };
 
-// Theme classes (unchanged)
 const getThemeClasses = (theme: Theme) => {
   if (theme === "light") {
     return {
@@ -260,7 +278,7 @@ const getThemeClasses = (theme: Theme) => {
   }
 };
 
-// --- SessionDetailsModal ---
+// --- SessionDetailsModal Component ---
 const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
   isOpen,
   onClose,
@@ -339,8 +357,9 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
         title: session.title,
         place: session.place,
         roomId: session.roomId,
-        startTime: session.startTime || "",
-        endTime: session.endTime || "",
+        // **FIX**: Use new converter to correctly populate edit form with IST time
+        startTime: convertISTToInputFormat(session.startTime),
+        endTime: convertISTToInputFormat(session.endTime),
         status: session.status,
         description: session.description,
       },
@@ -349,9 +368,9 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
 
   const onCancel = (sessionId: string) => {
     setEditing({ ...editing, [sessionId]: false });
-    const n = { ...draft };
-    delete n[sessionId];
-    setDraft(n);
+    const newDraft = { ...draft };
+    delete newDraft[sessionId];
+    setDraft(newDraft);
   };
 
   const onChangeDraft = (
@@ -368,12 +387,14 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
   const onSave = async (sessionId: string) => {
     const body = draft[sessionId];
     if (!body) return;
+
     setSaving({ ...saving, [sessionId]: true });
 
+    // **CRITICAL FIX**: Convert local times from form to IST before sending to API
     const payload = {
       ...body,
-      startTime: body.startTime,
-      endTime: body.endTime,
+      startTime: convertLocalToIST(body.startTime),
+      endTime: convertLocalToIST(body.endTime),
     };
 
     if (!payload.startTime || !payload.endTime) {
@@ -392,6 +413,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Failed to update session");
       }
+
       const result = await res.json();
       onSessionUpdate(sessionId, result.data);
       onCancel(sessionId);
@@ -405,7 +427,9 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
 
   const onDelete = async (sessionId: string) => {
     if (!confirm("Are you sure you want to delete this session?")) return;
+
     setDeleting({ ...deleting, [sessionId]: true });
+
     try {
       const res = await fetch(`/api/sessions/${sessionId}`, {
         method: "DELETE",
@@ -424,8 +448,6 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
       setDeleting({ ...deleting, [sessionId]: false });
     }
   };
-
-  // const themeClasses = getThemeClasses(theme);
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -688,19 +710,19 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
                       <div className="flex items-center gap-3">
                         <Clock className="w-4 h-4 text-purple-400" />
                         <span>
-                          {decomposeLocalTime(session.startTime)
+                          {parseISTTimeToLocal(session.startTime)
                             .hours.toString()
                             .padStart(2, "0")}
                           :
-                          {decomposeLocalTime(session.startTime)
+                          {parseISTTimeToLocal(session.startTime)
                             .minutes.toString()
                             .padStart(2, "0")}{" "}
                           -{" "}
-                          {decomposeLocalTime(session.endTime)
+                          {parseISTTimeToLocal(session.endTime)
                             .hours.toString()
                             .padStart(2, "0")}
                           :
-                          {decomposeLocalTime(session.endTime)
+                          {parseISTTimeToLocal(session.endTime)
                             .minutes.toString()
                             .padStart(2, "0")}{" "}
                           IST
@@ -746,7 +768,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
   );
 };
 
-// --- CreateSessionModal ---
+// --- CreateSessionModal Component ---
 const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
   isOpen,
   onClose,
@@ -778,11 +800,13 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     if (isOpen && defaultDate && defaultHour !== undefined) {
       const startDate = new Date(defaultDate);
       startDate.setHours(defaultHour, 0, 0, 0);
+
       const endDate = new Date(startDate);
       endDate.setHours(startDate.getHours() + 1);
 
-      setStartDateTime(toInputLocalString(startDate));
-      setEndDateTime(toInputLocalString(endDate));
+      // **FIX**: Use the new converter to correctly set the initial IST time in the inputs
+      setStartDateTime(convertISTToInputFormat(startDate.toISOString()));
+      setEndDateTime(convertISTToInputFormat(endDate.toISOString()));
     }
   }, [isOpen, defaultDate, defaultHour]);
 
@@ -793,7 +817,8 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
   const handleFacultyChange = (id: string) => {
     setFacultyId(id);
     const fac = availableFaculty.find((f) => f.id === id);
-    setEmail(fac ? fac.email : "");
+    if (fac) setEmail(fac.email);
+    else setEmail("");
   };
 
   const handleEventChange = (id: string) => {
@@ -828,9 +853,15 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     setLoading(true);
 
     try {
-      const start = parseLocalPartsToDate(startDateTime);
-      const end = parseLocalPartsToDate(endDateTime);
-      if (!start || !end || end <= start) {
+      // **CRITICAL FIX**: Convert local time strings from the form to IST before sending to the API
+      const istStartTime = convertLocalToIST(startDateTime);
+      const istEndTime = convertLocalToIST(endDateTime);
+
+      if (
+        !istStartTime ||
+        !istEndTime ||
+        new Date(istEndTime) <= new Date(istStartTime)
+      ) {
         alert("End time must be after start time.");
         setLoading(false);
         return;
@@ -849,9 +880,9 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       formData.append("travel", travelRequired);
       formData.append("accommodation", accommodationRequired);
 
-      // Store EXACT local strings; backend should persist as-is
-      formData.append("startTime", startDateTime);
-      formData.append("endTime", endDateTime);
+      // Send the corrected IST times to the server
+      formData.append("startTime", istStartTime);
+      formData.append("endTime", istEndTime);
 
       const response = await fetch("/api/sessions", {
         method: "POST",
@@ -951,13 +982,7 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
               >
                 Faculty *
                 <span className={`text-xs ${themeClasses.text.accent} ml-2`}>
-                  {
-                    (selectedEventId
-                      ? facultiesByEvent[selectedEventId] || []
-                      : []
-                    ).length
-                  }{" "}
-                  faculty available
+                  ({availableFaculty.length} faculty available)
                 </span>
               </label>
               <select
@@ -972,10 +997,7 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
                     ? "Select Faculty"
                     : "Please select an event first"}
                 </option>
-                {(selectedEventId
-                  ? facultiesByEvent[selectedEventId] || []
-                  : []
-                ).map((faculty) => (
+                {availableFaculty.map((faculty) => (
                   <option key={faculty.id} value={faculty.id}>
                     {faculty.name}
                     {faculty.department && ` (${faculty.department})`}
@@ -1177,7 +1199,7 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
   );
 };
 
-// --- Main SessionsCalendarView ---
+// --- Main SessionsCalendarView Component ---
 const SessionsCalendarView: React.FC = () => {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [rooms, setRooms] = useState<RoomLite[]>([]);
@@ -1203,6 +1225,8 @@ const SessionsCalendarView: React.FC = () => {
 
   const loadEventsAndFaculty = useCallback(async () => {
     try {
+      console.log("🔄 Loading events and faculty data...");
+
       const eventsResponse = await fetch("/api/events", {
         cache: "no-store",
         headers: { Accept: "application/json" },
@@ -1218,6 +1242,7 @@ const SessionsCalendarView: React.FC = () => {
         } else if (Array.isArray(eventsData)) {
           eventsList = eventsData;
         }
+        console.log(`✅ Loaded ${eventsList.length} events from database`);
       }
 
       const facultyResponse = await fetch("/api/faculties", {
@@ -1228,6 +1253,7 @@ const SessionsCalendarView: React.FC = () => {
       let allFaculties: Faculty[] = [];
       if (facultyResponse.ok) {
         allFaculties = await facultyResponse.json();
+        console.log(`✅ Loaded ${allFaculties.length} faculties from database`);
       }
 
       if (typeof window !== "undefined") {
@@ -1317,6 +1343,10 @@ const SessionsCalendarView: React.FC = () => {
           setEvents(eventsFromDb);
           setFacultiesByEvent(facultyMapping);
           setLastUpdateTime(new Date().toLocaleTimeString());
+
+          console.log(
+            `✅ Calendar updated: ${enhancedSessions.length} sessions, ${eventsFromDb.length} events`
+          );
         } else {
           setError(sessionsData?.error || "Failed to load sessions");
         }
@@ -1356,11 +1386,11 @@ const SessionsCalendarView: React.FC = () => {
     }).filter((day) => !isDateInPast(day.date) || day.isToday);
   }, [currentWeek]);
 
-  // Use local decomposition for slot filter (no Date parsing from ISO-like strings)
+  // **FIX**: Use the new `parseISTTimeToLocal` function for filtering sessions
   const getSessionsForSlot = (date: Date, hour: number) => {
     return sessions.filter((session) => {
-      const sessionStartTime = decomposeLocalTime(session.startTime);
-      const sessionEndTime = decomposeLocalTime(session.endTime);
+      const sessionStartTime = parseISTTimeToLocal(session.startTime);
+      const sessionEndTime = parseISTTimeToLocal(session.endTime);
       return (
         isSameDay(sessionStartTime.date, date) &&
         hour >= sessionStartTime.hours &&
@@ -1369,14 +1399,14 @@ const SessionsCalendarView: React.FC = () => {
     });
   };
 
-  // Calculate style positioning using minutes from midnight (local)
+  // **FIX**: Use `parseISTTimeToLocal` for calculating session position and duration
   const getSessionStyle = (session: Session) => {
-    const startTime = decomposeLocalTime(session.startTime);
-    const endTime = decomposeLocalTime(session.endTime);
+    const startTime = parseISTTimeToLocal(session.startTime);
+    const endTime = parseISTTimeToLocal(session.endTime);
 
     const startInMinutes = startTime.hours * 60 + startTime.minutes;
     const endInMinutes = endTime.hours * 60 + endTime.minutes;
-    const durationInMinutes = Math.max(endInMinutes - startInMinutes, 0);
+    const durationInMinutes = endInMinutes - startInMinutes;
 
     return {
       top: `${startInMinutes}px`,
@@ -1428,22 +1458,17 @@ const SessionsCalendarView: React.FC = () => {
   };
 
   const handleSessionClick = (session: Session) => {
-    const s = decomposeLocalTime(session.startTime);
-    const e = decomposeLocalTime(session.endTime);
+    const sessionTime = parseISTTimeToLocal(session.startTime);
     setSelectedSessions([session]);
-    setSelectedDate(format(s.date, "EEEE, MMMM d, yyyy"));
+    setSelectedDate(format(sessionTime.date, "EEEE, MMMM d, yyyy"));
     setSelectedTimeSlot(
-      `${String(s.hours % 12 === 0 ? 12 : s.hours % 12).padStart(
-        2,
-        "0"
-      )}:${String(s.minutes).padStart(2, "0")} ${
-        s.hours < 12 ? "AM" : "PM"
-      } - ${String(e.hours % 12 === 0 ? 12 : e.hours % 12).padStart(
-        2,
-        "0"
-      )}:${String(e.minutes).padStart(2, "0")} ${
-        e.hours < 12 ? "AM" : "PM"
-      } IST`
+      `${sessionTime.hours}:${sessionTime.minutes
+        .toString()
+        .padStart(2, "0")} - ${
+        parseISTTimeToLocal(session.endTime).hours
+      }:${parseISTTimeToLocal(session.endTime)
+        .minutes.toString()
+        .padStart(2, "0")} IST`
     );
     setIsModalOpen(true);
   };
@@ -1452,14 +1477,18 @@ const SessionsCalendarView: React.FC = () => {
     sessionId: string,
     updates: Partial<Session>
   ) => {
-    setSessions((prev) =>
-      prev.map((s) => (s.id === sessionId ? { ...s, ...updates } : s))
+    setSessions((prevSessions) =>
+      prevSessions.map((session) =>
+        session.id === sessionId ? { ...session, ...updates } : session
+      )
     );
     fetchSessions(false);
   };
 
   const handleSessionDelete = (sessionId: string) => {
-    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    setSessions((prevSessions) =>
+      prevSessions.filter((session) => session.id !== sessionId)
+    );
     fetchSessions(false);
   };
 
@@ -1472,8 +1501,10 @@ const SessionsCalendarView: React.FC = () => {
       const weekEnd = endOfWeek(newWeek, { weekStartsOn: 1 });
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+
       if (weekEnd < today) return;
     }
+
     setCurrentWeek(newWeek);
   };
 
@@ -1484,8 +1515,9 @@ const SessionsCalendarView: React.FC = () => {
     setShowCreateModal(true);
   };
 
-  const toggleTheme = () =>
+  const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
 
   const totalAvailableFaculty = Object.values(facultiesByEvent).flat().length;
 
@@ -1719,18 +1751,25 @@ const SessionsCalendarView: React.FC = () => {
                     );
                   })}
 
-                  {/* Session blocks positioned using local times */}
+                  {/* **FIX**: Session positioning with correct IST time parsing */}
                   {sessions
                     .filter((session) => {
                       if (!session.startTime) return false;
-                      const s = decomposeLocalTime(session.startTime);
-                      return isSameDay(s.date, day.date);
+                      const sessionTime = parseISTTimeToLocal(
+                        session.startTime
+                      );
+                      return isSameDay(sessionTime.date, day.date);
                     })
                     .map((session) => {
                       const style = getSessionStyle(session);
                       const colorClass = getSessionColor(session);
-                      const s = decomposeLocalTime(session.startTime);
-                      const isPastSession = isTimeSlotInPast(s.date, s.hours);
+                      const sessionTime = parseISTTimeToLocal(
+                        session.startTime
+                      );
+                      const isPastSession = isTimeSlotInPast(
+                        sessionTime.date,
+                        sessionTime.hours
+                      );
 
                       return (
                         <div
