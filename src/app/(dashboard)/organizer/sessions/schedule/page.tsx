@@ -492,11 +492,12 @@ const CreateSession: React.FC = () => {
           description: session.description.trim(),
           // ✅ Convert sessionDate to database timestamp fields
           suggested_time_start: session.sessionDate
-            ? `${session.sessionDate}T09:00:00.000Z`
+            ? `${session.sessionDate}T09:00:00`
             : "",
           suggested_time_end: session.sessionDate
-            ? `${session.sessionDate}T17:00:00.000Z`
+            ? `${session.sessionDate}T17:00:00`
             : "",
+
           status: session.status,
           invite_status: "Pending", // ✅ Using underscore format
           eventId: selectedEventId || "",
