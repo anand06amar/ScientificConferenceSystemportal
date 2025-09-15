@@ -1,4 +1,4 @@
-// src/app/(dashboard)/organizer/sessions/page.tsx - IST TIMEZONE FIX
+// src/app/(dashboard)/organizer/sessions/page.tsx - FIXED TYPESCRIPT ERRORS
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
@@ -42,8 +42,8 @@ export interface Session {
   roomId: string;
   roomName?: string;
   description?: string;
-  startTime: string; // Stored as IST ISO String
-  endTime: string; // Stored as IST ISO String
+  startTime: string;
+  endTime: string;
   status: "Draft" | "Confirmed";
   inviteStatus: "Pending" | "Accepted" | "Declined";
   rejectionReason?: "NotInterested" | "SuggestedTopic" | "TimeConflict";
@@ -118,66 +118,76 @@ interface CreateSessionModalProps {
 }
 
 // ============================================================================
-// #region IST TIMEZONE HELPER FUNCTIONS (COMPLETE IST FIX)
+// #region FIXED IST TIMEZONE HELPER FUNCTIONS WITH NULL SAFETY
 // ============================================================================
 
 /**
- * **KEY FIX 1: From User Input (IST) to Database (IST)**
- * Converts a local time string from a 'datetime-local' input (IST)
- * into an IST ISO string for database storage.
+ * ✅ FIXED: Convert local datetime input to IST format with null safety
  */
 const convertLocalToIST = (localDateTimeString?: string): string | null => {
   if (!localDateTimeString) return null;
-  // Append seconds and the IST offset (+05:30) to the string.
-  const isoStringWithOffset = `${localDateTimeString}:00+05:30`;
-  const date = new Date(isoStringWithOffset);
-  return isValid(date) ? date.toISOString() : null;
+  try {
+    return `${localDateTimeString}:00`;
+  } catch (error) {
+    console.error("Error formatting IST time:", error);
+    return null;
+  }
 };
 
 /**
- * **KEY FIX 2: From Database (IST) to User Input (Local)**
- * Converts an IST ISO string (from the database) into the local time string
- * format required by a 'datetime-local' input field.
+ * ✅ FIXED: Convert IST datetime to input format with null safety
  */
-const convertISTToInputFormat = (istISOString?: string): string => {
-  if (!istISOString) return "";
-  const date = new Date(istISOString);
-  if (!isValid(date)) return "";
-
-  // Convert to IST
-  const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
-
-  const year = istDate.getUTCFullYear();
-  const month = (istDate.getUTCMonth() + 1).toString().padStart(2, "0");
-  const day = istDate.getUTCDate().toString().padStart(2, "0");
-  const hours = istDate.getUTCHours().toString().padStart(2, "0");
-  const minutes = istDate.getUTCMinutes().toString().padStart(2, "0");
-
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
+const convertISTToInputFormat = (istTimeString?: string): string => {
+  if (!istTimeString) return "";
+  try {
+    return istTimeString.substring(0, 16);
+  } catch (error) {
+    console.error("Error converting IST to input format:", error);
+    return "";
+  }
 };
 
 /**
- * **KEY FIX 3: For Display Logic**
- * Parses an IST ISO string from the database and returns its components
- * in IST timezone. Used for positioning sessions on the calendar.
+ * ✅ FIXED: Parse IST time string to components with complete null safety
  */
-const parseISTTimeToLocal = (istISOString?: string) => {
-  if (!istISOString) return { hours: 0, minutes: 0, date: new Date() };
-  const date = new Date(istISOString);
-  if (!isValid(date)) return { hours: 0, minutes: 0, date: new Date() };
+// ✅ FIXED: Parse IST time string to components with complete null safety
+const parseISTTimeToLocal = (
+  istTimeString?: string
+): { hours: number; minutes: number; date: Date } => {
+  if (!istTimeString) {
+    return { hours: 0, minutes: 0, date: new Date() };
+  }
 
-  // Convert to IST
-  const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
+  try {
+    const parts = istTimeString.split("T");
+    const datePart = parts.length > 0 ? parts[0] : "";
+    const timePart = parts.length > 1 ? parts[1] : ""; // ✅ FIXED: Safe access with fallback
 
-  return {
-    hours: istDate.getUTCHours(),
-    minutes: istDate.getUTCMinutes(),
-    date: new Date(
-      istDate.getUTCFullYear(),
-      istDate.getUTCMonth(),
-      istDate.getUTCDate()
-    ),
-  };
+    if (!datePart || !timePart) {
+      // ✅ FIXED: Check both parts exist
+      return { hours: 0, minutes: 0, date: new Date() };
+    }
+
+    const dateSegments = datePart.split("-");
+    const year = dateSegments[0]
+      ? parseInt(dateSegments[0])
+      : new Date().getFullYear();
+    const month = dateSegments[1] ? parseInt(dateSegments[1]) : 1;
+    const day = dateSegments[2] ? parseInt(dateSegments[2]) : 1;
+
+    const timeSegments = timePart.split(":");
+    const hours = timeSegments[0] ? parseInt(timeSegments[0]) : 0;
+    const minutes = timeSegments[1] ? parseInt(timeSegments[1]) : 0;
+
+    return {
+      hours,
+      minutes,
+      date: new Date(year, month - 1, day), // month is 0-indexed
+    };
+  } catch (error) {
+    console.error("Error parsing IST time:", error);
+    return { hours: 0, minutes: 0, date: new Date() };
+  }
 };
 
 // #endregion
@@ -357,7 +367,6 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
         title: session.title,
         place: session.place,
         roomId: session.roomId,
-        // **FIX**: Use new converter to correctly populate edit form with IST time
         startTime: convertISTToInputFormat(session.startTime),
         endTime: convertISTToInputFormat(session.endTime),
         status: session.status,
@@ -390,7 +399,6 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
 
     setSaving({ ...saving, [sessionId]: true });
 
-    // **CRITICAL FIX**: Convert local times from form to IST before sending to API
     const payload = {
       ...body,
       startTime: convertLocalToIST(body.startTime),
@@ -708,7 +716,7 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <Clock className="w-4 h-4 text-purple-400" />
+                        <Clock className="w-4 w-4 text-purple-400" />
                         <span>
                           {parseISTTimeToLocal(session.startTime)
                             .hours.toString()
@@ -804,9 +812,31 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       const endDate = new Date(startDate);
       endDate.setHours(startDate.getHours() + 1);
 
-      // **FIX**: Use the new converter to correctly set the initial IST time in the inputs
-      setStartDateTime(convertISTToInputFormat(startDate.toISOString()));
-      setEndDateTime(convertISTToInputFormat(endDate.toISOString()));
+      const startStr = `${startDate.getFullYear()}-${(startDate.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")}-${startDate
+        .getDate()
+        .toString()
+        .padStart(2, "0")}T${startDate
+        .getHours()
+        .toString()
+        .padStart(2, "0")}:${startDate
+        .getMinutes()
+        .toString()
+        .padStart(2, "0")}`;
+
+      const endStr = `${endDate.getFullYear()}-${(endDate.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")}-${endDate
+        .getDate()
+        .toString()
+        .padStart(2, "0")}T${endDate
+        .getHours()
+        .toString()
+        .padStart(2, "0")}:${endDate.getMinutes().toString().padStart(2, "0")}`;
+
+      setStartDateTime(startStr);
+      setEndDateTime(endStr);
     }
   }, [isOpen, defaultDate, defaultHour]);
 
@@ -853,7 +883,6 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     setLoading(true);
 
     try {
-      // **CRITICAL FIX**: Convert local time strings from the form to IST before sending to the API
       const istStartTime = convertLocalToIST(startDateTime);
       const istEndTime = convertLocalToIST(endDateTime);
 
@@ -880,7 +909,6 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       formData.append("travel", travelRequired);
       formData.append("accommodation", accommodationRequired);
 
-      // Send the corrected IST times to the server
       formData.append("startTime", istStartTime);
       formData.append("endTime", istEndTime);
 
@@ -1386,7 +1414,7 @@ const SessionsCalendarView: React.FC = () => {
     }).filter((day) => !isDateInPast(day.date) || day.isToday);
   }, [currentWeek]);
 
-  // **FIX**: Use the new `parseISTTimeToLocal` function for filtering sessions
+  // ✅ FIXED: Use the corrected parseISTTimeToLocal function with null safety
   const getSessionsForSlot = (date: Date, hour: number) => {
     return sessions.filter((session) => {
       const sessionStartTime = parseISTTimeToLocal(session.startTime);
@@ -1399,7 +1427,7 @@ const SessionsCalendarView: React.FC = () => {
     });
   };
 
-  // **FIX**: Use `parseISTTimeToLocal` for calculating session position and duration
+  // ✅ FIXED: Use corrected parseISTTimeToLocal for calculating session position
   const getSessionStyle = (session: Session) => {
     const startTime = parseISTTimeToLocal(session.startTime);
     const endTime = parseISTTimeToLocal(session.endTime);
@@ -1751,7 +1779,7 @@ const SessionsCalendarView: React.FC = () => {
                     );
                   })}
 
-                  {/* **FIX**: Session positioning with correct IST time parsing */}
+                  {/* ✅ FIXED: Session positioning with correct IST time parsing */}
                   {sessions
                     .filter((session) => {
                       if (!session.startTime) return false;
