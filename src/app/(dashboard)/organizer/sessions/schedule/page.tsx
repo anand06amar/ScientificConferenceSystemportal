@@ -72,7 +72,7 @@ type SessionForm = {
   place: string;
   roomId: string;
   description: string;
-  sessionDate: string; // Changed from startTime/endTime to single date
+  sessionDate: string; // Date-based scheduling
   status: "Draft" | "Confirmed";
 };
 
@@ -96,7 +96,7 @@ const CreateSession: React.FC = () => {
       place: "",
       roomId: "",
       description: "",
-      sessionDate: "", // Changed from startTime/endTime
+      sessionDate: "",
       status: "Draft",
     },
   ]);
@@ -221,7 +221,6 @@ const CreateSession: React.FC = () => {
 
         if (eventsFromDb.length === 0) {
           console.log("No events found, checking for any available faculty...");
-          // If no events but faculty exists, still show them
           if (allFaculties.length > 0) {
             setFaculties(allFaculties);
           } else {
@@ -276,8 +275,8 @@ const CreateSession: React.FC = () => {
   // Handle event selection
   const handleEventChange = (eventId: string) => {
     setSelectedEventId(eventId);
-    setFacultyId(""); // Reset faculty selection
-    setEmail(""); // Reset email
+    setFacultyId("");
+    setEmail("");
 
     // Auto-fill place with event location if available
     const selectedEvent = events.find((e) => e.id === eventId);
@@ -301,7 +300,7 @@ const CreateSession: React.FC = () => {
     // Get faculty list for selected event
     const availableFaculty = selectedEventId
       ? facultiesByEvent[selectedEventId] || []
-      : faculties; // Fallback to all faculties if no event selected
+      : faculties;
 
     // Find the selected faculty and auto-fill email
     const selectedFaculty = availableFaculty.find(
@@ -327,7 +326,7 @@ const CreateSession: React.FC = () => {
       place: sessions[0]?.place || "",
       roomId: "",
       description: "",
-      sessionDate: "", // Changed from startTime/endTime
+      sessionDate: "",
       status: "Draft",
     };
     setSessions([...sessions, newSession]);
@@ -412,7 +411,7 @@ const CreateSession: React.FC = () => {
     setPosterPreview("");
   };
 
-  // Updated validation to work with dates instead of times
+  // Updated validation to work with dates
   const validateForm = () => {
     const errors: Record<string, string> = {};
 
@@ -441,7 +440,7 @@ const CreateSession: React.FC = () => {
       if (session.sessionDate) {
         const sessionDate = new Date(session.sessionDate);
         const today = new Date();
-        today.setHours(0, 0, 0, 0); // Reset time for date comparison
+        today.setHours(0, 0, 0, 0);
 
         if (sessionDate < today) {
           errors[`${prefix}-sessionDate`] =
@@ -454,6 +453,7 @@ const CreateSession: React.FC = () => {
     return Object.keys(errors).length === 0;
   };
 
+  // ✅ UPDATED: Handle submit with proper database field mapping
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -482,6 +482,7 @@ const CreateSession: React.FC = () => {
 
         const form = new FormData();
 
+        // ✅ UPDATED: Map to database fields with draft times
         const sessionData = {
           title: session.title.trim(),
           facultyId: facultyId,
@@ -489,15 +490,22 @@ const CreateSession: React.FC = () => {
           place: session.place.trim(),
           roomId: session.roomId,
           description: session.description.trim(),
-          sessionDate: session.sessionDate, // Changed from startTime/endTime
+          // ✅ Convert sessionDate to database timestamp fields
+          suggested_time_start: session.sessionDate
+            ? `${session.sessionDate}T09:00:00.000Z`
+            : "",
+          suggested_time_end: session.sessionDate
+            ? `${session.sessionDate}T17:00:00.000Z`
+            : "",
           status: session.status,
-          inviteStatus: "Pending",
-          eventId: selectedEventId, // Include event ID
+          invite_status: "Pending", // ✅ Using underscore format
+          eventId: selectedEventId || "",
           travelStatus: "Pending",
         };
 
         console.log(`Session ${index + 1} data:`, sessionData);
 
+        // ✅ UPDATED: Required fields to match database schema
         const requiredFields = [
           "title",
           "facultyId",
@@ -505,15 +513,15 @@ const CreateSession: React.FC = () => {
           "place",
           "roomId",
           "description",
-          "sessionDate", // Changed from startTime/endTime
+          "suggested_time_start", // ✅ Updated field names
+          "suggested_time_end", // ✅ Updated field names
           "status",
         ];
-        const missingFields = requiredFields.filter(
-          (field) =>
-            !sessionData[field as keyof typeof sessionData] ||
-            sessionData[field as keyof typeof sessionData].toString().trim() ===
-              ""
-        );
+
+        const missingFields = requiredFields.filter((field) => {
+          const value = sessionData[field as keyof typeof sessionData];
+          return !value || value.toString().trim() === "";
+        });
 
         if (missingFields.length > 0) {
           throw new Error(
@@ -539,9 +547,9 @@ const CreateSession: React.FC = () => {
         });
 
         if (response.ok) {
-          const sessionData = await response.json();
-          createdSessions.push(sessionData);
-          console.log(`Session created successfully: ${sessionData.title}`);
+          const responseData = await response.json();
+          createdSessions.push(responseData);
+          console.log(`Session created successfully: ${responseData.title}`);
         } else {
           const errorData = await response.json();
           console.error(
@@ -617,7 +625,7 @@ const CreateSession: React.FC = () => {
         place: "",
         roomId: "",
         description: "",
-        sessionDate: "", // Changed from startTime/endTime
+        sessionDate: "",
         status: "Draft",
       },
     ]);
@@ -942,6 +950,16 @@ const CreateSession: React.FC = () => {
                               </select>
                             </div>
                           </div>
+
+                          {/* ✅ NEW: Draft Time Notice */}
+                          <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-600 rounded-lg">
+                            <p className="text-yellow-200 text-sm">
+                              ℹ️ <strong>Note:</strong> Sessions will be created
+                              with draft times (9 AM - 5 PM) for database
+                              compatibility. Actual timing can be coordinated
+                              later with faculty.
+                            </p>
+                          </div>
                         </div>
 
                         {/* Poster Upload */}
@@ -1210,11 +1228,15 @@ const CreateSession: React.FC = () => {
                                   </div>
                                 </div>
 
-                                {/* Date Selection - NEW */}
+                                {/* Date Selection */}
                                 <div>
                                   <label className="block text-sm font-medium text-gray-200 mb-2">
                                     <CalendarDays className="h-4 w-4 inline mr-1 text-blue-400" />
                                     Session Date *
+                                    <span className="text-xs text-yellow-400 ml-2">
+                                      (Draft times 9 AM - 5 PM will be
+                                      auto-assigned)
+                                    </span>
                                   </label>
                                   <input
                                     type="date"
@@ -1226,7 +1248,7 @@ const CreateSession: React.FC = () => {
                                         e.target.value
                                       )
                                     }
-                                    min={new Date().toISOString().split("T")[0]} // Prevent past dates
+                                    min={new Date().toISOString().split("T")[0]}
                                     className={`w-full p-3 border-2 rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-800 text-white ${
                                       validationErrors[
                                         `${session.id}-sessionDate`
@@ -1256,7 +1278,8 @@ const CreateSession: React.FC = () => {
                                         year: "numeric",
                                         month: "long",
                                         day: "numeric",
-                                      })}
+                                      })}{" "}
+                                      (9:00 AM - 5:00 PM draft timing)
                                     </p>
                                   )}
                                 </div>
@@ -1425,6 +1448,14 @@ const CreateSession: React.FC = () => {
                                             : "Not set"}
                                         </span>
                                       </div>
+                                      <div>
+                                        <span className="text-gray-400">
+                                          Draft Time:
+                                        </span>
+                                        <span className="text-yellow-300 ml-2">
+                                          9:00 AM - 5:00 PM
+                                        </span>
+                                      </div>
                                     </div>
                                     {session.description && (
                                       <div className="mt-2 pt-2 border-t border-gray-700">
@@ -1462,9 +1493,11 @@ const CreateSession: React.FC = () => {
                             <strong>Ready to send bulk invitation!</strong>
                             <br />A single comprehensive email will be sent to{" "}
                             {selectedFaculty?.name} with all {sessions.length}{" "}
-                            session(s) scheduled by date
+                            session(s) scheduled by date (with draft times 9 AM
+                            - 5 PM)
                             {posterFile && " and the attached poster"}. The
-                            faculty can respond to each session individually.
+                            faculty can respond to each session individually and
+                            coordinate exact timing later.
                           </AlertDescription>
                         </Alert>
                       </div>
@@ -1538,7 +1571,21 @@ const CreateSession: React.FC = () => {
                         Date-Based Scheduling
                       </p>
                       <p className="text-gray-300 text-xs">
-                        Multiple sessions can be scheduled on the same date
+                        Multiple sessions can be scheduled on the same date with
+                        draft times
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <div className="p-1 rounded bg-yellow-800">
+                      <CalendarDays className="h-4 w-4 text-yellow-400" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-white">Draft Times</p>
+                      <p className="text-gray-300 text-xs">
+                        Auto-assigns 9 AM - 5 PM as placeholder times for
+                        database
                       </p>
                     </div>
                   </div>
@@ -1565,18 +1612,6 @@ const CreateSession: React.FC = () => {
                       </p>
                       <p className="text-gray-300 text-xs">
                         Copy session details (except date)
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <div className="p-1 rounded bg-purple-800">
-                      <CalendarDays className="h-4 w-4 text-purple-400" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-white">Flexible Dates</p>
-                      <p className="text-gray-300 text-xs">
-                        No time constraints, date-only scheduling
                       </p>
                     </div>
                   </div>
@@ -1644,7 +1679,8 @@ const CreateSession: React.FC = () => {
                       Date-Only Scheduling
                     </p>
                     <p className="text-blue-300 text-xs">
-                      Only select the date - no specific times needed
+                      Only select the date - draft times (9 AM - 5 PM) are
+                      auto-assigned
                     </p>
                   </div>
 
@@ -1657,11 +1693,13 @@ const CreateSession: React.FC = () => {
                     </p>
                   </div>
 
-                  <div className="p-3 bg-orange-900/30 rounded-lg border border-orange-800">
-                    <p className="font-medium text-orange-200">Quick Setup</p>
-                    <p className="text-orange-300 text-xs">
-                      Set common location and status in Step 1 to apply to all
-                      sessions
+                  <div className="p-3 bg-yellow-900/30 rounded-lg border border-yellow-800">
+                    <p className="font-medium text-yellow-200">
+                      Timing Coordination
+                    </p>
+                    <p className="text-yellow-300 text-xs">
+                      Faculty can coordinate exact session times after accepting
+                      invitations
                     </p>
                   </div>
                 </CardContent>
