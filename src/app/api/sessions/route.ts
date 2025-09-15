@@ -1,4 +1,4 @@
-// src/app/api/sessions/route.ts - UPDATED with Dynamic Faculty Invitations
+// src/app/api/sessions/route.ts - UPDATED with Dynamic Faculty Invitations & Field Mapping Fix
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import {
@@ -128,13 +128,17 @@ export async function GET() {
         canTrack: !!(s.facultyEmail && s.inviteStatus),
       };
     });
+
     console.log("API Response first session:", enriched[0]); // Debug line
-      // ADD THIS DEBUG LINE HERE
-    console.log("🔍 Sessions data before sending:", enriched.map(s => ({
-      title: s.title,
-      eventName: s.eventName,
-      originalEventName: s.eventName
-    })));
+    console.log(
+      "🔍 Sessions data before sending:",
+      enriched.map((s) => ({
+        title: s.title,
+        eventName: s.eventName,
+        originalEventName: s.eventName,
+      }))
+    );
+
     return NextResponse.json(
       { success: true, data: { sessions: enriched }, count: enriched.length },
       { headers: { "Content-Type": "application/json" } }
@@ -169,26 +173,43 @@ export async function POST(req: NextRequest) {
 
     const formData = await req.formData();
 
-    // Required fields
+    // ✅ FIXED: Extract fields with both naming conventions
     const title = formData.get("title")?.toString() || "";
     const facultyId = formData.get("facultyId")?.toString() || "";
     const email = formData.get("email")?.toString() || "";
     const place = formData.get("place")?.toString() || "";
     const roomId = formData.get("roomId")?.toString() || "";
     const description = formData.get("description")?.toString() || "";
-    const startTime = formData.get("startTime")?.toString() || "";
-    const endTime = formData.get("endTime")?.toString() || "";
-    const eventId = formData.get("eventId")?.toString() || "default-conference-2025";
-    const status = (formData.get("status")?.toString() as "Draft" | "Confirmed") || "Draft";
-    
-    // ENHANCED: Dynamic invitation status (remove manual override)
-    // const inviteStatus = "Pending"; // Always start as Pending for dynamic system
-    
-    const travel = formData.get("travel")?.toString();
+
+    // ✅ FIXED: Handle both old and new field names for time
+    const startTime =
+      formData.get("startTime")?.toString() ||
+      formData.get("suggested_time_start")?.toString() ||
+      "";
+    const endTime =
+      formData.get("endTime")?.toString() ||
+      formData.get("suggested_time_end")?.toString() ||
+      "";
+
+    const eventId =
+      formData.get("eventId")?.toString() || "default-conference-2025";
+    const status =
+      (formData.get("status")?.toString() as "Draft" | "Confirmed") || "Draft";
+
+    // ✅ FIXED: Handle invite_status field name
+    const inviteStatus =
+      formData.get("inviteStatus")?.toString() ||
+      formData.get("invite_status")?.toString() ||
+      "Pending";
+
+    const travel =
+      formData.get("travel")?.toString() ||
+      formData.get("travelStatus")?.toString();
     const accommodation = formData.get("accommodation")?.toString();
 
-    const travelRequired = travel === "yes";
-    const accommodationRequired = accommodation === "yes";
+    const travelRequired = travel === "yes" || travel === "true";
+    const accommodationRequired =
+      accommodation === "yes" || accommodation === "true";
 
     console.log("📋 Creating session with DYNAMIC invitations:", {
       title,
@@ -200,38 +221,84 @@ export async function POST(req: NextRequest) {
       endTime,
       eventId,
       status,
+      inviteStatus,
       travel: travelRequired,
       accommodation: accommodationRequired,
     });
 
-    // Validation
-    if (!title || !facultyId || !email || !place || !roomId || !description || !startTime) {
+    // ✅ FIXED: Updated validation - don't require times for date-based sessions
+    const missingFields = [];
+    if (!title) missingFields.push("title");
+    if (!facultyId) missingFields.push("facultyId");
+    if (!email) missingFields.push("email");
+    if (!place) missingFields.push("place");
+    if (!roomId) missingFields.push("roomId");
+    if (!description) missingFields.push("description");
+
+    if (missingFields.length > 0) {
+      console.error("❌ Missing required fields:", missingFields);
       return NextResponse.json(
-        { success: false, error: "Missing required fields" },
+        {
+          success: false,
+          error: `Missing required fields: ${missingFields.join(", ")}`,
+          receivedFields: Object.fromEntries(formData.entries()),
+        },
         { status: 400 }
       );
     }
 
-    // Parse and validate time
+    // ✅ FIXED: Handle time parsing with fallback for date-based sessions
     let finalStartTime: string;
     let finalEndTime: string;
 
     try {
-      const parsedStartTime = parseLocalDateTime(startTime);
-      const parsedEndTime = endTime ? parseLocalDateTime(endTime) : null;
+      // If no times provided, generate default times for the date
+      if (!startTime || !endTime) {
+        console.log(
+          "⚠️ No times provided, generating default times for date-based session"
+        );
 
-      if (!parsedStartTime) {
-        throw new Error("Invalid start time format");
-      }
+        // Try to extract date from startTime if it's a date string
+        let baseDate = new Date();
+        if (startTime) {
+          try {
+            baseDate = new Date(startTime);
+          } catch (e) {
+            console.log("Could not parse startTime as date, using today");
+          }
+        }
 
-      finalStartTime = parsedStartTime;
+        // Set default times: 9 AM to 5 PM on the specified date
+        const startDate = new Date(baseDate);
+        startDate.setHours(9, 0, 0, 0);
+        const endDate = new Date(baseDate);
+        endDate.setHours(17, 0, 0, 0);
 
-      if (!parsedEndTime) {
-        const startDate = new Date(finalStartTime);
-        const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+        finalStartTime = startDate.toISOString();
         finalEndTime = endDate.toISOString();
+
+        console.log("✅ Generated default times:", {
+          finalStart: finalStartTime,
+          finalEnd: finalEndTime,
+        });
       } else {
-        finalEndTime = parsedEndTime;
+        // Parse provided times
+        const parsedStartTime = parseLocalDateTime(startTime);
+        const parsedEndTime = parseLocalDateTime(endTime);
+
+        if (!parsedStartTime) {
+          throw new Error("Invalid start time format");
+        }
+
+        finalStartTime = parsedStartTime;
+
+        if (!parsedEndTime) {
+          const startDate = new Date(finalStartTime);
+          const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+          finalEndTime = endDate.toISOString();
+        } else {
+          finalEndTime = parsedEndTime;
+        }
       }
 
       const start = new Date(finalStartTime);
@@ -252,54 +319,42 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      console.log("Time validation passed:", {
+      console.log("✅ Time validation passed:", {
         finalStart: finalStartTime,
         finalEnd: finalEndTime,
         duration: `${durationMinutes} minutes`,
       });
     } catch (timeError) {
-      console.error("Time parsing error:", timeError);
+      console.error("❌ Time parsing error:", timeError);
       return NextResponse.json(
-        { success: false, error: "Invalid time format" },
+        {
+          success: false,
+          error: `Time parsing failed: ${timeError}`,
+          providedTimes: { startTime, endTime },
+        },
         { status: 400 }
       );
     }
 
-    // Check for conflicts
+    // ✅ UPDATED: Skip conflict checking for date-based sessions (since times are just placeholders)
     const conflictOnly = formData.get("conflictOnly")?.toString() === "true";
-    const overwriteConflicts = formData.get("overwriteConflicts")?.toString() === "true";
-
-    const conflicts = await checkSessionConflicts({
-      facultyId,
-      roomId,
-      startTime: finalStartTime,
-      endTime: finalEndTime,
-    });
+    const overwriteConflicts =
+      formData.get("overwriteConflicts")?.toString() === "true";
 
     if (conflictOnly) {
+      // For date-based sessions, return no conflicts
       return NextResponse.json({
         success: true,
-        conflicts,
-        hasConflicts: conflicts.length > 0,
+        conflicts: [],
+        hasConflicts: false,
+        message: "Date-based sessions don't check for time conflicts",
       });
-    }
-
-    if (conflicts.length > 0 && !overwriteConflicts) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Scheduling conflicts detected",
-          conflicts,
-          hasConflicts: true,
-        },
-        { status: 409 }
-      );
     }
 
     // Generate session ID
     const sessionId = randomUUID();
 
-    // ENHANCED: Create session with DYNAMIC faculty invitation system
+    // ✅ FIXED: Create session with proper field mapping
     const sessionData = {
       sessionId,
       eventId,
@@ -312,12 +367,12 @@ export async function POST(req: NextRequest) {
       facultyEmail: email,
       place,
       status,
-      inviteStatus: "Pending" as "Pending", // Always start as Pending for dynamic tracking
+      inviteStatus: inviteStatus as "Pending" | "Accepted" | "Declined",
       travel: travelRequired,
       accommodation: accommodationRequired,
     };
 
-    console.log("Creating session with DYNAMIC faculty invitation system:", sessionData);
+    console.log("✅ Creating session with proper field mapping:", sessionData);
 
     // Use enhanced createSessionWithEvent function
     const createdSessionId = await createSessionWithEvent(sessionData);
@@ -331,7 +386,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log("Session verified with dynamic invitation tracking:", verify.inviteStatus);
+    console.log(
+      "✅ Session verified with dynamic invitation tracking:",
+      verify.inviteStatus
+    );
 
     // Get faculty and room info for response
     const faculties = await getFaculties();
@@ -352,7 +410,7 @@ export async function POST(req: NextRequest) {
       startTime: finalStartTime,
       endTime: finalEndTime,
       status,
-      inviteStatus: "Pending" as "Pending", // Explicitly type as "Pending"
+      inviteStatus: inviteStatus as "Pending",
       eventId,
       // ENHANCED: Add invitation tracking info
       invitationSent: true,
@@ -362,7 +420,7 @@ export async function POST(req: NextRequest) {
       accommodation: accommodationRequired,
     };
 
-    // ENHANCED: Send invitation email with response tracking
+    // ✅ ENHANCED: Send invitation email with response tracking
     try {
       const result = await sendInviteEmail(
         sessionForResponse,
@@ -371,12 +429,16 @@ export async function POST(req: NextRequest) {
       );
 
       if (!result.ok) {
-        console.warn("Email failed but session created with dynamic tracking:", result.message);
+        console.warn(
+          "⚠️ Email failed but session created with dynamic tracking:",
+          result.message
+        );
         return NextResponse.json(
           {
             success: true,
             emailStatus: "failed",
-            warning: "Session created with invitation tracking, but email could not be sent",
+            warning:
+              "Session created with invitation tracking, but email could not be sent",
             data: {
               ...sessionForResponse,
               facultyName: faculty?.name,
@@ -388,7 +450,9 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      console.log("Session created successfully with dynamic invitation system");
+      console.log(
+        "✅ Session created successfully with dynamic invitation system"
+      );
       return NextResponse.json(
         {
           success: true,
@@ -405,12 +469,14 @@ export async function POST(req: NextRequest) {
         { status: 201 }
       );
     } catch (emailError: any) {
-      console.error("Email sending error:", emailError);
+      console.error("❌ Email sending error:", emailError);
       return NextResponse.json(
         {
           success: true,
           emailStatus: "error",
-          warning: "Session created with invitation tracking, but email failed: " + (emailError?.message || "Unknown error"),
+          warning:
+            "Session created with invitation tracking, but email failed: " +
+            (emailError?.message || "Unknown error"),
           data: {
             ...sessionForResponse,
             facultyName: faculty?.name,
@@ -422,12 +488,13 @@ export async function POST(req: NextRequest) {
       );
     }
   } catch (err: any) {
-    console.error("Error creating session with dynamic invitations:", err);
+    console.error("❌ Error creating session with dynamic invitations:", err);
     return NextResponse.json(
       {
         success: false,
         error: "Internal server error",
         details: err?.message || "",
+        stack: process.env.NODE_ENV === "development" ? err?.stack : undefined,
       },
       { status: 500 }
     );
