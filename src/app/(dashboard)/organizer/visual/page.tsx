@@ -1,4 +1,4 @@
-// src/app/(dashboard)/organizer/sessions/page.tsx - IST TIMEZONE FIX
+// src/app/(dashboard)/organizer/sessions/page.tsx - IST ONLY (no UTC conversions)
 "use client";
 
 import React, { useEffect, useState, useMemo, useCallback } from "react";
@@ -42,8 +42,9 @@ export interface Session {
   roomId: string;
   roomName?: string;
   description?: string;
-  startTime: string; // Stored as IST ISO String
-  endTime: string; // Stored as IST ISO String
+  // Store as IST local string from <input type="datetime-local">, e.g., "2025-09-15T14:30"
+  startTime: string;
+  endTime: string;
   status: "Draft" | "Confirmed";
   inviteStatus: "Pending" | "Accepted" | "Declined";
   rejectionReason?: "NotInterested" | "SuggestedTopic" | "TimeConflict";
@@ -86,8 +87,8 @@ type DraftSession = {
   title?: string;
   place: string;
   roomId?: string;
-  startTime?: string;
-  endTime?: string;
+  startTime?: string; // "YYYY-MM-DDTHH:mm"
+  endTime?: string; // "YYYY-MM-DDTHH:mm"
   status: "Draft" | "Confirmed";
   description?: string;
 };
@@ -118,65 +119,46 @@ interface CreateSessionModalProps {
 }
 
 // ============================================================================
-// #region IST TIMEZONE HELPER FUNCTIONS (COMPLETE IST FIX)
+// #region IST HELPERS (no UTC conversion)
 // ============================================================================
 
 /**
- * **KEY FIX 1: From User Input (IST) to Database (IST)**
- * Converts a local time string from a 'datetime-local' input (IST)
- * into an IST ISO string for database storage.
+ * Returns the "YYYY-MM-DDTHH:mm" string to set on datetime-local inputs from a Date
+ * assumed to already be IST-local representation. Avoids toISOString().
  */
-const convertLocalToIST = (localDateTimeString?: string): string | null => {
-  if (!localDateTimeString) return null;
-  // Append seconds and the IST offset (+05:30) to the string.
-  const isoStringWithOffset = `${localDateTimeString}:00+05:30`;
-  const date = new Date(isoStringWithOffset);
-  return isValid(date) ? date.toISOString() : null;
-};
-
-/**
- * **KEY FIX 2: From Database (IST) to User Input (Local)**
- * Converts an IST ISO string (from the database) into the local time string
- * format required by a 'datetime-local' input field.
- */
-const convertISTToInputFormat = (istISOString?: string): string => {
-  if (!istISOString) return "";
-  const date = new Date(istISOString);
-  if (!isValid(date)) return "";
-
-  // Convert to IST
-  const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
-
-  const year = istDate.getUTCFullYear();
-  const month = (istDate.getUTCMonth() + 1).toString().padStart(2, "0");
-  const day = istDate.getUTCDate().toString().padStart(2, "0");
-  const hours = istDate.getUTCHours().toString().padStart(2, "0");
-  const minutes = istDate.getUTCMinutes().toString().padStart(2, "0");
-
+const toInputLocalString = (d?: Date): string => {
+  if (!d || !isValid(d)) return "";
+  const year = d.getFullYear();
+  const month = (d.getMonth() + 1).toString().padStart(2, "0");
+  const day = d.getDate().toString().padStart(2, "0");
+  const hours = d.getHours().toString().padStart(2, "0");
+  const minutes = d.getMinutes().toString().padStart(2, "0");
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
 /**
- * **KEY FIX 3: For Display Logic**
- * Parses an IST ISO string from the database and returns its components
- * in IST timezone. Used for positioning sessions on the calendar.
+ * Parse a stored IST local string "YYYY-MM-DDTHH:mm" into a Date in the runtime's local tz.
+ * No offset math; relies on JS to treat it as local wall time.
  */
-const parseISTTimeToLocal = (istISOString?: string) => {
-  if (!istISOString) return { hours: 0, minutes: 0, date: new Date() };
-  const date = new Date(istISOString);
-  if (!isValid(date)) return { hours: 0, minutes: 0, date: new Date() };
+const parseLocalStringToDate = (localDateTime?: string): Date | null => {
+  if (!localDateTime) return null;
+  // Ensure seconds optional
+  const str =
+    localDateTime.length === 16 ? `${localDateTime}:00` : localDateTime;
+  const d = new Date(str.replace(" ", "T"));
+  return isValid(d) ? d : null;
+};
 
-  // Convert to IST
-  const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
-
+/**
+ * Extract hours, minutes, and the date portion for grid positioning from local IST string.
+ */
+const decomposeLocalTime = (localDateTime?: string) => {
+  const d = parseLocalStringToDate(localDateTime);
+  if (!d) return { hours: 0, minutes: 0, date: new Date() };
   return {
-    hours: istDate.getUTCHours(),
-    minutes: istDate.getUTCMinutes(),
-    date: new Date(
-      istDate.getUTCFullYear(),
-      istDate.getUTCMonth(),
-      istDate.getUTCDate()
-    ),
+    hours: d.getHours(),
+    minutes: d.getMinutes(),
+    date: new Date(d.getFullYear(), d.getMonth(), d.getDate()),
   };
 };
 
@@ -193,6 +175,7 @@ const isTimeSlotInPast = (date: Date, hour: number) => {
   return slotDate < now;
 };
 
+// THEME (unchanged)
 const getThemeClasses = (theme: Theme) => {
   if (theme === "light") {
     return {
@@ -357,9 +340,9 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
         title: session.title,
         place: session.place,
         roomId: session.roomId,
-        // **FIX**: Use new converter to correctly populate edit form with IST time
-        startTime: convertISTToInputFormat(session.startTime),
-        endTime: convertISTToInputFormat(session.endTime),
+        // Directly use stored local IST string for edit fields
+        startTime: session.startTime || "",
+        endTime: session.endTime || "",
         status: session.status,
         description: session.description,
       },
@@ -390,11 +373,11 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
 
     setSaving({ ...saving, [sessionId]: true });
 
-    // **CRITICAL FIX**: Convert local times from form to IST before sending to API
+    // Keep local IST strings as-is, do not convert
     const payload = {
       ...body,
-      startTime: convertLocalToIST(body.startTime),
-      endTime: convertLocalToIST(body.endTime),
+      startTime: body.startTime,
+      endTime: body.endTime,
     };
 
     if (!payload.startTime || !payload.endTime) {
@@ -710,19 +693,19 @@ const SessionDetailsModal: React.FC<SessionDetailsModalProps> = ({
                       <div className="flex items-center gap-3">
                         <Clock className="w-4 h-4 text-purple-400" />
                         <span>
-                          {parseISTTimeToLocal(session.startTime)
+                          {decomposeLocalTime(session.startTime)
                             .hours.toString()
                             .padStart(2, "0")}
                           :
-                          {parseISTTimeToLocal(session.startTime)
+                          {decomposeLocalTime(session.startTime)
                             .minutes.toString()
                             .padStart(2, "0")}{" "}
                           -{" "}
-                          {parseISTTimeToLocal(session.endTime)
+                          {decomposeLocalTime(session.endTime)
                             .hours.toString()
                             .padStart(2, "0")}
                           :
-                          {parseISTTimeToLocal(session.endTime)
+                          {decomposeLocalTime(session.endTime)
                             .minutes.toString()
                             .padStart(2, "0")}{" "}
                           IST
@@ -804,9 +787,9 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       const endDate = new Date(startDate);
       endDate.setHours(startDate.getHours() + 1);
 
-      // **FIX**: Use the new converter to correctly set the initial IST time in the inputs
-      setStartDateTime(convertISTToInputFormat(startDate.toISOString()));
-      setEndDateTime(convertISTToInputFormat(endDate.toISOString()));
+      // Set direct local strings for the inputs
+      setStartDateTime(toInputLocalString(startDate));
+      setEndDateTime(toInputLocalString(endDate));
     }
   }, [isOpen, defaultDate, defaultHour]);
 
@@ -853,15 +836,11 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
     setLoading(true);
 
     try {
-      // **CRITICAL FIX**: Convert local time strings from the form to IST before sending to the API
-      const istStartTime = convertLocalToIST(startDateTime);
-      const istEndTime = convertLocalToIST(endDateTime);
+      // Validate local order using parsed Dates (still treated as local)
+      const start = parseLocalStringToDate(startDateTime);
+      const end = parseLocalStringToDate(endDateTime);
 
-      if (
-        !istStartTime ||
-        !istEndTime ||
-        new Date(istEndTime) <= new Date(istStartTime)
-      ) {
+      if (!start || !end || end <= start) {
         alert("End time must be after start time.");
         setLoading(false);
         return;
@@ -880,9 +859,9 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
       formData.append("travel", travelRequired);
       formData.append("accommodation", accommodationRequired);
 
-      // Send the corrected IST times to the server
-      formData.append("startTime", istStartTime);
-      formData.append("endTime", istEndTime);
+      // Store local IST strings as-is; if backend wants an offset, consider appending "+05:30" without converting.
+      formData.append("startTime", startDateTime);
+      formData.append("endTime", endDateTime);
 
       const response = await fetch("/api/sessions", {
         method: "POST",
@@ -982,7 +961,14 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
               >
                 Faculty *
                 <span className={`text-xs ${themeClasses.text.accent} ml-2`}>
-                  ({availableFaculty.length} faculty available)
+                  (
+                  {
+                    (selectedEventId
+                      ? facultiesByEvent[selectedEventId] || []
+                      : []
+                    ).length
+                  }{" "}
+                  faculty available)
                 </span>
               </label>
               <select
@@ -997,7 +983,10 @@ const CreateSessionModal: React.FC<CreateSessionModalProps> = ({
                     ? "Select Faculty"
                     : "Please select an event first"}
                 </option>
-                {availableFaculty.map((faculty) => (
+                {(selectedEventId
+                  ? facultiesByEvent[selectedEventId] || []
+                  : []
+                ).map((faculty) => (
                   <option key={faculty.id} value={faculty.id}>
                     {faculty.name}
                     {faculty.department && ` (${faculty.department})`}
@@ -1225,8 +1214,6 @@ const SessionsCalendarView: React.FC = () => {
 
   const loadEventsAndFaculty = useCallback(async () => {
     try {
-      console.log("🔄 Loading events and faculty data...");
-
       const eventsResponse = await fetch("/api/events", {
         cache: "no-store",
         headers: { Accept: "application/json" },
@@ -1242,7 +1229,6 @@ const SessionsCalendarView: React.FC = () => {
         } else if (Array.isArray(eventsData)) {
           eventsList = eventsData;
         }
-        console.log(`✅ Loaded ${eventsList.length} events from database`);
       }
 
       const facultyResponse = await fetch("/api/faculties", {
@@ -1253,7 +1239,6 @@ const SessionsCalendarView: React.FC = () => {
       let allFaculties: Faculty[] = [];
       if (facultyResponse.ok) {
         allFaculties = await facultyResponse.json();
-        console.log(`✅ Loaded ${allFaculties.length} faculties from database`);
       }
 
       if (typeof window !== "undefined") {
@@ -1343,10 +1328,6 @@ const SessionsCalendarView: React.FC = () => {
           setEvents(eventsFromDb);
           setFacultiesByEvent(facultyMapping);
           setLastUpdateTime(new Date().toLocaleTimeString());
-
-          console.log(
-            `✅ Calendar updated: ${enhancedSessions.length} sessions, ${eventsFromDb.length} events`
-          );
         } else {
           setError(sessionsData?.error || "Failed to load sessions");
         }
@@ -1386,11 +1367,11 @@ const SessionsCalendarView: React.FC = () => {
     }).filter((day) => !isDateInPast(day.date) || day.isToday);
   }, [currentWeek]);
 
-  // **FIX**: Use the new `parseISTTimeToLocal` function for filtering sessions
+  // Use local decomposition for slot filter
   const getSessionsForSlot = (date: Date, hour: number) => {
     return sessions.filter((session) => {
-      const sessionStartTime = parseISTTimeToLocal(session.startTime);
-      const sessionEndTime = parseISTTimeToLocal(session.endTime);
+      const sessionStartTime = decomposeLocalTime(session.startTime);
+      const sessionEndTime = decomposeLocalTime(session.endTime);
       return (
         isSameDay(sessionStartTime.date, date) &&
         hour >= sessionStartTime.hours &&
@@ -1399,14 +1380,14 @@ const SessionsCalendarView: React.FC = () => {
     });
   };
 
-  // **FIX**: Use `parseISTTimeToLocal` for calculating session position and duration
+  // Calculate style positioning in minutes from midnight using local decomposition
   const getSessionStyle = (session: Session) => {
-    const startTime = parseISTTimeToLocal(session.startTime);
-    const endTime = parseISTTimeToLocal(session.endTime);
+    const startTime = decomposeLocalTime(session.startTime);
+    const endTime = decomposeLocalTime(session.endTime);
 
     const startInMinutes = startTime.hours * 60 + startTime.minutes;
     const endInMinutes = endTime.hours * 60 + endTime.minutes;
-    const durationInMinutes = endInMinutes - startInMinutes;
+    const durationInMinutes = Math.max(endInMinutes - startInMinutes, 0);
 
     return {
       top: `${startInMinutes}px`,
@@ -1458,15 +1439,15 @@ const SessionsCalendarView: React.FC = () => {
   };
 
   const handleSessionClick = (session: Session) => {
-    const sessionTime = parseISTTimeToLocal(session.startTime);
+    const sessionTime = decomposeLocalTime(session.startTime);
     setSelectedSessions([session]);
     setSelectedDate(format(sessionTime.date, "EEEE, MMMM d, yyyy"));
     setSelectedTimeSlot(
       `${sessionTime.hours}:${sessionTime.minutes
         .toString()
         .padStart(2, "0")} - ${
-        parseISTTimeToLocal(session.endTime).hours
-      }:${parseISTTimeToLocal(session.endTime)
+        decomposeLocalTime(session.endTime).hours
+      }:${decomposeLocalTime(session.endTime)
         .minutes.toString()
         .padStart(2, "0")} IST`
     );
@@ -1751,21 +1732,17 @@ const SessionsCalendarView: React.FC = () => {
                     );
                   })}
 
-                  {/* **FIX**: Session positioning with correct IST time parsing */}
+                  {/* Session blocks positioned using local times */}
                   {sessions
                     .filter((session) => {
                       if (!session.startTime) return false;
-                      const sessionTime = parseISTTimeToLocal(
-                        session.startTime
-                      );
+                      const sessionTime = decomposeLocalTime(session.startTime);
                       return isSameDay(sessionTime.date, day.date);
                     })
                     .map((session) => {
                       const style = getSessionStyle(session);
                       const colorClass = getSessionColor(session);
-                      const sessionTime = parseISTTimeToLocal(
-                        session.startTime
-                      );
+                      const sessionTime = decomposeLocalTime(session.startTime);
                       const isPastSession = isTimeSlotInPast(
                         sessionTime.date,
                         sessionTime.hours
