@@ -236,7 +236,7 @@ export default function FacultyAllSessionsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push("/faculty/dashboard")}
+                onClick={() => router.push("/faculty")}
               >
                 <ArrowLeft className="h-4 w-4 mr-1" />
                 Back
@@ -266,7 +266,7 @@ export default function FacultyAllSessionsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => router.push("/faculty/dashboard")}
+              onClick={() => router.push("/faculty")}
               className="border-slate-700 text-slate-300 hover:bg-slate-800"
             >
               <ArrowLeft className="h-4 w-4 mr-1" />
@@ -405,18 +405,86 @@ export default function FacultyAllSessionsPage() {
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-slate-300">
+                        {/* COMMENTED OUT: Time display */}
+                        {/* 
+  <div className="flex items-center">
+    <Calendar className="h-3 w-3 mr-1" />
+    {session.formattedTime ||
+      `${session.formattedStartTime || ""}${
+        session.formattedEndTime
+          ? ` - ${session.formattedEndTime}`
+          : ""
+      }`}
+  </div>
+  */}
+
+                        {/* NEW: Date in dd/mm/yyyy format */}
+                        {/* FIXED: Date in dd/mm/yyyy format from formattedTime */}
                         <div className="flex items-center">
                           <Calendar className="h-3 w-3 mr-1" />
-                          {session.formattedTime ||
-                            `${session.formattedStartTime || ""}${
-                              session.formattedEndTime
-                                ? ` - ${session.formattedEndTime}`
-                                : ""
-                            }`}
+                          {(() => {
+                            if (!session.formattedTime)
+                              return "Date not available";
+
+                            try {
+                              // Try to parse the formattedTime as a date
+                              const date = new Date(session.formattedTime);
+                              if (!isNaN(date.getTime())) {
+                                return date.toLocaleDateString("en-GB", {
+                                  day: "2-digit",
+                                  month: "2-digit",
+                                  year: "numeric",
+                                });
+                              }
+                            } catch (e) {
+                              // If parsing fails, try to extract date patterns
+                            }
+
+                            // If formattedTime is in format like "15/03/2025 14:30" or "15/03/2025, 14:30"
+                            const datePattern1 = session.formattedTime.match(
+                              /(\d{1,2}\/\d{1,2}\/\d{4})/
+                            );
+                            if (datePattern1) {
+                              return datePattern1[1]; // Already in dd/mm/yyyy format
+                            }
+
+                            // If formattedTime is in format like "March 15, 2025 2:30 PM"
+                            const datePattern2 =
+                              session.formattedTime.match(
+                                /(\w+ \d{1,2}, \d{4})/
+                              );
+                            if (datePattern2) {
+                              const date = new Date(datePattern2[1]);
+                              return date.toLocaleDateString("en-GB", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                              });
+                            }
+
+                            // If formattedTime is in format like "2025-03-15 14:30"
+                            const datePattern3 = session.formattedTime.match(
+                              /(\d{4}-\d{1,2}-\d{1,2})/
+                            );
+                            if (datePattern3) {
+                              const date = new Date(datePattern3[1]);
+                              return date.toLocaleDateString("en-GB", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                              });
+                            }
+
+                            // If all else fails, try to take the first part before space/comma
+                            const firstPart =
+                              session.formattedTime.split(/[\s,]+/)[0];
+                            return firstPart || session.formattedTime;
+                          })()}
                         </div>
+
                         <div className="flex items-center">
                           <MapPin className="h-3 w-3 mr-1" />
-                          {session.place} - {session.roomName}
+                          {session.place}
                         </div>
                         <div className="flex items-center">
                           <Clock className="h-3 w-3 mr-1" />
@@ -431,7 +499,6 @@ export default function FacultyAllSessionsPage() {
                           {session.sessionStatus || session.status}
                         </div>
                       </div>
-
                       {session.description && (
                         <p className="text-xs text-slate-400 mt-2 line-clamp-2">
                           {session.description}
