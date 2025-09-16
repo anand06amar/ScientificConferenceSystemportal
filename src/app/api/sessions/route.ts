@@ -1,4 +1,4 @@
-// src/app/api/sessions/route.ts - FIXED DatabaseSession property access
+// src/app/api/sessions/route.ts - UPDATED: No email sending
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import {
@@ -8,7 +8,7 @@ import {
   getSessionById,
 } from "@/lib/database/session-queries";
 import { createSessionWithEvent } from "@/lib/database/event-session-integration";
-import { sendInviteEmail } from "../_utils/session-email";
+// ✅ REMOVED: import { sendInviteEmail } from "../_utils/session-email";
 
 // Helper function to parse datetime strings with complete null safety
 function parseLocalDateTime(dateTimeStr?: string): string | null {
@@ -76,7 +76,6 @@ async function checkSessionConflicts(
             id: existingSession.id,
             title: existingSession.title || "Untitled Session",
             facultyId: existingSession.facultyId,
-            // roomId: existingSession.hallId || existingSession.roomId, // ✅ FIXED: Use hallId with fallback
             startTime: existingSession.startTime,
             endTime: existingSession.endTime,
             type: "faculty",
@@ -183,7 +182,7 @@ export async function GET() {
   }
 }
 
-// POST: create a session with enhanced error handling and IST support
+// ✅ UPDATED: POST handler with email sending removed
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get("content-type") || "";
@@ -239,7 +238,7 @@ export async function POST(req: NextRequest) {
     const accommodationRequired =
       accommodation === "yes" || accommodation === "true";
 
-    console.log("📋 Creating session with enhanced error handling:", {
+    console.log("📋 Creating session (no email sending):", {
       title,
       facultyId,
       email,
@@ -400,10 +399,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log(
-      "✅ Session verified with dynamic invitation tracking:",
-      verify.inviteStatus
-    );
+    console.log("✅ Session verified and stored in database:", verify.id);
 
     // Get faculty and room info for response
     const faculties = await getFaculties();
@@ -411,11 +407,12 @@ export async function POST(req: NextRequest) {
     const faculty = faculties.find((f) => f.id === facultyId);
     const room = rooms.find((r) => r.id === roomId);
 
-    // Prepare enhanced session data for response
+    // ✅ UPDATED: Prepare session data for response (without email sending)
     const sessionForResponse = {
       id: createdSessionId,
       title,
       facultyId,
+      facultyName: faculty?.name || "Faculty Member",
       email,
       place,
       roomId, // Keep roomId for frontend compatibility
@@ -426,82 +423,28 @@ export async function POST(req: NextRequest) {
       status,
       inviteStatus: inviteStatus as "Pending",
       eventId,
-      invitationSent: true,
-      canTrackResponse: true,
-      responseUrl: `/api/faculty/respond?sessionId=${createdSessionId}&facultyEmail=${email}`,
       travel: travelRequired,
       accommodation: accommodationRequired,
+      // ✅ UPDATED: No email-related fields
+      emailSent: false,
+      invitationSent: false,
+      created: true,
+      stored: true,
     };
 
-    // Send invitation email with response tracking
-    try {
-      const result = await sendInviteEmail(
-        sessionForResponse,
-        faculty?.name || "Faculty Member",
-        email
-      );
-
-      if (!result.ok) {
-        console.warn(
-          "⚠️ Email failed but session created with dynamic tracking:",
-          result.message
-        );
-        return NextResponse.json(
-          {
-            success: true,
-            emailStatus: "failed",
-            warning:
-              "Session created with invitation tracking, but email could not be sent",
-            data: {
-              ...sessionForResponse,
-              facultyName: faculty?.name,
-              roomName: room?.name,
-              invitationTracking: "enabled",
-            },
-          },
-          { status: 201 }
-        );
-      }
-
-      console.log(
-        "✅ Session created successfully with dynamic invitation system"
-      );
-      return NextResponse.json(
-        {
-          success: true,
-          emailStatus: "sent",
-          message: "Session created with dynamic faculty invitation tracking",
-          data: {
-            ...sessionForResponse,
-            facultyName: faculty?.name,
-            roomName: room?.name,
-            invitationTracking: "enabled",
-            emailSent: true,
-          },
-        },
-        { status: 201 }
-      );
-    } catch (emailError: any) {
-      console.error("❌ Email sending error:", emailError);
-      return NextResponse.json(
-        {
-          success: true,
-          emailStatus: "error",
-          warning:
-            "Session created with invitation tracking, but email failed: " +
-            (emailError?.message || "Unknown error"),
-          data: {
-            ...sessionForResponse,
-            facultyName: faculty?.name,
-            roomName: room?.name,
-            invitationTracking: "enabled",
-          },
-        },
-        { status: 201 }
-      );
-    }
+    // ✅ UPDATED: Return success response without sending email
+    console.log("✅ Session created and stored successfully (no email sent)");
+    return NextResponse.json(
+      {
+        success: true,
+        message: "Session created and stored in database successfully",
+        emailStatus: "disabled",
+        data: sessionForResponse,
+      },
+      { status: 201 }
+    );
   } catch (err: any) {
-    console.error("❌ Error creating session with dynamic invitations:", err);
+    console.error("❌ Error creating session:", err);
     return NextResponse.json(
       {
         success: false,
