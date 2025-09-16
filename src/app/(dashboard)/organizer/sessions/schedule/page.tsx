@@ -449,7 +449,7 @@ const ExcelSessionCreator: React.FC = () => {
           const sessions = sessionsByEmail[email];
 
           try {
-            const emailResponse = await fetch("/api/sessions/bulk-invite", {
+            const emailResponse = await fetch("/api/sessions", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
