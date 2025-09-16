@@ -68,8 +68,8 @@ type ExcelSessionData = {
   place: string;
   sessionTitle: string;
   date: string;
-  role: string; // Goes into description
-  roomId?: string;
+  role: string;
+  roomId: string; // ✅ FIXED: Made required instead of optional
   status: "Draft" | "Confirmed";
 };
 
@@ -121,7 +121,7 @@ const ExcelSessionCreator: React.FC = () => {
     loadEventsAndRooms();
   }, [loadEventsAndRooms]);
 
-  // Handle Excel file upload and parsing
+  // ✅ FIXED: Handle Excel file upload and parsing with complete null safety
   const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -135,6 +135,7 @@ const ExcelSessionCreator: React.FC = () => {
     parseExcelFile(file);
   };
 
+  // ✅ FIXED: Parse Excel file with comprehensive error handling
   const parseExcelFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -183,7 +184,7 @@ const ExcelSessionCreator: React.FC = () => {
               sessionTitle,
               date,
               role,
-              roomId: "",
+              roomId: "", // ✅ FIXED: Initialize as empty string, not undefined
               status: "Draft" as const,
             };
           }
@@ -225,9 +226,19 @@ const ExcelSessionCreator: React.FC = () => {
         session.id === sessionId ? { ...session, [field]: value } : session
       )
     );
+
+    // Clear validation error for this field
+    const errorKey = `${sessionId}-${field === "roomId" ? "room" : field}`;
+    if (validationErrors[errorKey]) {
+      setValidationErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[errorKey];
+        return newErrors;
+      });
+    }
   };
 
-  // Validate form
+  // ✅ ENHANCED: Comprehensive form validation
   const validateForm = () => {
     const errors: Record<string, string> = {};
 
@@ -240,7 +251,7 @@ const ExcelSessionCreator: React.FC = () => {
     }
 
     // Validate each session
-    parsedSessions.forEach((session, index) => {
+    parsedSessions.forEach((session) => {
       if (!session.facultyName.trim()) {
         errors[`${session.id}-name`] = "Faculty name is required";
       }
@@ -253,8 +264,9 @@ const ExcelSessionCreator: React.FC = () => {
       if (!session.date) {
         errors[`${session.id}-date`] = "Date is required";
       }
-      if (!session.roomId) {
-        errors[`${session.id}-room`] = "Room is required";
+      // ✅ CRITICAL: Ensure room is assigned
+      if (!session.roomId || session.roomId.trim() === "") {
+        errors[`${session.id}-room`] = "Room assignment is required";
       }
     });
 
@@ -262,7 +274,7 @@ const ExcelSessionCreator: React.FC = () => {
     return Object.keys(errors).length === 0;
   };
 
-  // Create all sessions
+  // ✅ FIXED: Create all sessions with comprehensive error handling
   const handleCreateSessions = async () => {
     if (!validateForm()) {
       setErrorMessage("Please fix all validation errors before proceeding.");
@@ -284,47 +296,103 @@ const ExcelSessionCreator: React.FC = () => {
         );
 
         const formData = new FormData();
-        formData.append("title", session.sessionTitle.trim());
-        formData.append("facultyId", `excel-faculty-${session.email}`); // Generate temporary faculty ID
-        formData.append("email", session.email.trim());
-        formData.append("place", session.place.trim());
-        // formData.append("roomId", session.roomId);
-        formData.append("description", session.role.trim());
-        formData.append("status", session.status);
-        formData.append("eventId", selectedEventId);
-        formData.append("invite_status", "Pending");
 
-        // Format date to IST timestamp
-        const sessionDate = new Date(session.date);
-        const startTime = `${sessionDate.toISOString().split("T")[0]}T09:00:00`;
-        const endTime = `${sessionDate.toISOString().split("T")[0]}T17:00:00`;
+        // ✅ FIXED: Helper function for safe FormData appending
+        const appendSafely = (
+          key: string,
+          value: string | undefined | null,
+          isRequired = true
+        ) => {
+          if (value !== undefined && value !== null && value.trim() !== "") {
+            formData.append(key, value.trim());
+          } else if (isRequired) {
+            throw new Error(
+              `Missing required field: ${key} for session "${session.sessionTitle}"`
+            );
+          }
+        };
 
-        formData.append("suggested_time_start", startTime);
-        formData.append("suggested_time_end", endTime);
+        // ✅ FIXED: Safe appending with validation
+        try {
+          appendSafely("title", session.sessionTitle);
+          appendSafely("facultyId", `excel-faculty-${session.email}`);
+          appendSafely("email", session.email);
+          appendSafely("place", session.place);
 
-        const response = await fetch("/api/sessions", {
-          method: "POST",
-          body: formData,
-        });
+          // ✅ CRITICAL FIX: Ensure roomId is assigned before proceeding
+          if (!session.roomId || session.roomId.trim() === "") {
+            throw new Error(
+              `Session "${session.sessionTitle}" is missing room assignment. Please assign a room to all sessions.`
+            );
+          }
+          appendSafely("roomId", session.roomId);
 
-        if (response.ok) {
-          const responseData = await response.json();
-          createdSessionsList.push({
-            ...responseData.data,
-            facultyName: session.facultyName,
-            originalEmail: session.email,
+          appendSafely("description", session.role);
+          appendSafely("status", session.status);
+          appendSafely("eventId", selectedEventId);
+          formData.append("invite_status", "Pending"); // This is always defined
+
+          // ✅ FIXED: Safe date handling
+          if (session.date) {
+            try {
+              const sessionDate = new Date(session.date);
+              if (isNaN(sessionDate.getTime())) {
+                throw new Error("Invalid date");
+              }
+
+              const startTime = `${
+                sessionDate.toISOString().split("T")[0]
+              }T09:00:00`;
+              const endTime = `${
+                sessionDate.toISOString().split("T")[0]
+              }T17:00:00`;
+
+              formData.append("suggested_time_start", startTime);
+              formData.append("suggested_time_end", endTime);
+            } catch (dateError) {
+              console.error("Date parsing error:", dateError);
+              throw new Error(
+                `Invalid date format for session: ${session.sessionTitle}`
+              );
+            }
+          } else {
+            throw new Error(
+              `Session "${session.sessionTitle}" is missing date`
+            );
+          }
+
+          const response = await fetch("/api/sessions", {
+            method: "POST",
+            body: formData,
           });
-          console.log(`Session created successfully: ${session.sessionTitle}`);
-        } else {
-          const errorData = await response.json();
+
+          if (response.ok) {
+            const responseData = await response.json();
+            createdSessionsList.push({
+              ...responseData.data,
+              facultyName: session.facultyName,
+              originalEmail: session.email,
+            });
+            console.log(
+              `Session created successfully: ${session.sessionTitle}`
+            );
+          } else {
+            const errorData = await response.json();
+            console.error(
+              `Session creation error for "${session.sessionTitle}":`,
+              errorData
+            );
+            throw new Error(
+              errorData.error ||
+                `Failed to create session: ${session.sessionTitle}`
+            );
+          }
+        } catch (validationError) {
           console.error(
-            `Session creation error for "${session.sessionTitle}":`,
-            errorData
+            `Validation error for session "${session.sessionTitle}":`,
+            validationError
           );
-          throw new Error(
-            errorData.error ||
-              `Failed to create session: ${session.sessionTitle}`
-          );
+          throw validationError; // Re-throw to be caught by outer catch
         }
       }
 
@@ -345,7 +413,7 @@ const ExcelSessionCreator: React.FC = () => {
     }
   };
 
-  // Send bulk invitations
+  // ✅ FIXED: Send bulk invitations with safe grouping
   const handleSendInvitations = async () => {
     if (createdSessions.length === 0) {
       setErrorMessage("No sessions created yet. Please create sessions first.");
@@ -358,43 +426,52 @@ const ExcelSessionCreator: React.FC = () => {
     try {
       console.log("Sending bulk invitation emails...");
 
-      // Group sessions by faculty email
+      // ✅ FIXED: Safe grouping with proper type checking
       const sessionsByEmail: Record<string, any[]> = {};
       createdSessions.forEach((session) => {
         const email = session.originalEmail || session.email;
-        if (!sessionsByEmail[email]) {
-          sessionsByEmail[email] = [];
+        if (email && typeof email === "string") {
+          // ✅ Type guard
+          if (!sessionsByEmail[email]) {
+            sessionsByEmail[email] = [];
+          }
+          sessionsByEmail[email].push(session);
         }
-        sessionsByEmail[email].push(session);
       });
 
       let successfulEmails = 0;
       const failedEmails: string[] = [];
 
-      for (const [email, sessions] of Object.entries(sessionsByEmail)) {
-        try {
-          const emailResponse = await fetch("/api/sessions/bulk-invite", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email,
-              sessions,
-              eventId: selectedEventId,
-              facultyName: sessions[0]?.facultyName || "Faculty Member",
-            }),
-          });
+      // ✅ FIXED: Safe iteration with proper type checking
+      for (const email in sessionsByEmail) {
+        if (sessionsByEmail.hasOwnProperty(email)) {
+          // ✅ Safe property check
+          const sessions = sessionsByEmail[email];
 
-          if (emailResponse.ok) {
-            successfulEmails++;
-            console.log(`Bulk invitation sent to: ${email}`);
-          } else {
-            const emailError = await emailResponse.json();
-            console.warn(`Email failed for ${email}:`, emailError);
+          try {
+            const emailResponse = await fetch("/api/sessions/bulk-invite", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                email,
+                sessions,
+                eventId: selectedEventId,
+                facultyName: sessions?.[0]?.facultyName ?? "Faculty Member",
+              }),
+            });
+
+            if (emailResponse.ok) {
+              successfulEmails++;
+              console.log(`Bulk invitation sent to: ${email}`);
+            } else {
+              const emailError = await emailResponse.json();
+              console.warn(`Email failed for ${email}:`, emailError);
+              failedEmails.push(email);
+            }
+          } catch (emailError) {
+            console.warn(`Email error for ${email}:`, emailError);
             failedEmails.push(email);
           }
-        } catch (emailError) {
-          console.warn(`Email error for ${email}:`, emailError);
-          failedEmails.push(email);
         }
       }
 
@@ -430,7 +507,7 @@ const ExcelSessionCreator: React.FC = () => {
         Email: "john.smith@university.edu",
         Place: "Main Campus",
         "Session Title": "Introduction to AI",
-        Date: "2024-09-20",
+        Date: "2025-09-20",
         Role: "Keynote Speaker - Artificial Intelligence Expert",
       },
       {
@@ -438,7 +515,7 @@ const ExcelSessionCreator: React.FC = () => {
         Email: "jane.doe@university.edu",
         Place: "Science Building",
         "Session Title": "Data Science Workshop",
-        Date: "2024-09-21",
+        Date: "2025-09-21",
         Role: "Workshop Facilitator - Data Science Department",
       },
     ];
@@ -479,6 +556,14 @@ const ExcelSessionCreator: React.FC = () => {
   const prevStep = () => {
     setFormStep(formStep - 1);
   };
+
+  // Helper function to check if all sessions have room assignments
+  const allRoomsAssigned = parsedSessions.every(
+    (s) => s.roomId && s.roomId.trim() !== ""
+  );
+  const assignedRoomsCount = parsedSessions.filter(
+    (s) => s.roomId && s.roomId.trim() !== ""
+  ).length;
 
   return (
     <OrganizerLayout>
@@ -720,17 +805,46 @@ const ExcelSessionCreator: React.FC = () => {
                         <h3 className="text-lg font-semibold text-white">
                           Review Sessions ({parsedSessions.length})
                         </h3>
-                        <Badge className="bg-emerald-800 text-emerald-200">
-                          Event:{" "}
-                          {events.find((e) => e.id === selectedEventId)?.name}
-                        </Badge>
+                        <div className="flex items-center gap-4">
+                          <Badge className="bg-emerald-800 text-emerald-200">
+                            Event:{" "}
+                            {events.find((e) => e.id === selectedEventId)?.name}
+                          </Badge>
+                          <Badge
+                            className={
+                              allRoomsAssigned
+                                ? "bg-green-800 text-green-200"
+                                : "bg-red-800 text-red-200"
+                            }
+                          >
+                            Rooms: {assignedRoomsCount}/{parsedSessions.length}{" "}
+                            Assigned
+                          </Badge>
+                        </div>
                       </div>
+
+                      {/* Show warning if any sessions are missing room assignments */}
+                      {!allRoomsAssigned && (
+                        <Alert className="border-red-600 bg-red-900/20">
+                          <AlertTriangle className="h-4 w-4 text-red-400" />
+                          <AlertDescription className="text-red-200">
+                            <strong>Action Required:</strong> Please assign
+                            rooms to all sessions before proceeding.
+                            {parsedSessions.length - assignedRoomsCount}{" "}
+                            sessions are missing room assignments.
+                          </AlertDescription>
+                        </Alert>
+                      )}
 
                       <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
                         {parsedSessions.map((session, index) => (
                           <Card
                             key={session.id}
-                            className="border-gray-600 bg-gray-800/50"
+                            className={`border-gray-600 bg-gray-800/50 ${
+                              !session.roomId || session.roomId.trim() === ""
+                                ? "border-red-500 bg-red-900/10"
+                                : ""
+                            }`}
                           >
                             <CardHeader className="pb-3">
                               <div className="flex items-center justify-between">
@@ -770,8 +884,10 @@ const ExcelSessionCreator: React.FC = () => {
                                     {session.place}
                                   </span>
                                 </div>
-                                <div>
-                                  <label className="text-gray-400">Room:</label>
+                                <div className="md:col-span-2">
+                                  <label className="text-gray-400 block mb-1">
+                                    Room: *
+                                  </label>
                                   <select
                                     value={session.roomId}
                                     onChange={(e) =>
@@ -781,19 +897,34 @@ const ExcelSessionCreator: React.FC = () => {
                                         e.target.value
                                       )
                                     }
-                                    className={`ml-2 p-1 text-xs rounded bg-gray-700 text-white border ${
+                                    className={`w-full p-2 text-sm rounded bg-gray-700 text-white border ${
+                                      !session.roomId ||
+                                      session.roomId.trim() === "" ||
                                       validationErrors[`${session.id}-room`]
-                                        ? "border-red-500"
+                                        ? "border-red-500 bg-red-900/20"
                                         : "border-gray-600"
                                     }`}
                                   >
-                                    <option value="">Select Room</option>
+                                    <option value="">
+                                      ⚠️ Select Room (Required)
+                                    </option>
                                     {rooms.map((room) => (
                                       <option key={room.id} value={room.id}>
                                         {room.name}
                                       </option>
                                     ))}
                                   </select>
+                                  {(!session.roomId ||
+                                    session.roomId.trim() === "") && (
+                                    <p className="text-red-400 text-xs mt-1">
+                                      Room assignment is required
+                                    </p>
+                                  )}
+                                  {validationErrors[`${session.id}-room`] && (
+                                    <p className="text-red-400 text-xs mt-1">
+                                      {validationErrors[`${session.id}-room`]}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                               {session.role && (
@@ -806,22 +937,37 @@ const ExcelSessionCreator: React.FC = () => {
                                   </p>
                                 </div>
                               )}
-                              {validationErrors[`${session.id}-room`] && (
-                                <p className="text-red-400 text-xs">
-                                  {validationErrors[`${session.id}-room`]}
-                                </p>
-                              )}
                             </CardContent>
                           </Card>
                         ))}
                       </div>
 
-                      <div className="bg-emerald-900/20 border border-emerald-700 rounded-lg p-4">
-                        <div className="flex items-center gap-2 text-emerald-200">
-                          <CheckCircle className="h-4 w-4" />
-                          <span className="font-medium">
-                            Ready to create {parsedSessions.length} sessions
-                          </span>
+                      {/* ✅ ENHANCED: Ready status with room validation */}
+                      <div
+                        className={`border rounded-lg p-4 ${
+                          allRoomsAssigned
+                            ? "bg-emerald-900/20 border-emerald-700"
+                            : "bg-yellow-900/20 border-yellow-700"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          {allRoomsAssigned ? (
+                            <>
+                              <CheckCircle className="h-4 w-4 text-emerald-400" />
+                              <span className="font-medium text-emerald-200">
+                                Ready to create {parsedSessions.length} sessions
+                                - All rooms assigned ✓
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="h-4 w-4 text-yellow-400" />
+                              <span className="font-medium text-yellow-200">
+                                Please assign rooms to all sessions before
+                                proceeding
+                              </span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -956,7 +1102,7 @@ const ExcelSessionCreator: React.FC = () => {
                           disabled={
                             !selectedEventId || parsedSessions.length === 0
                           }
-                          className="bg-gradient-to-r from-emerald-500 to-blue-600 hover:from-emerald-600 hover:to-blue-700 text-white shadow-lg"
+                          className="bg-gradient-to-r from-emerald-500 to-blue-600 hover:from-emerald-600 hover:to-blue-700 text-white shadow-lg disabled:opacity-50"
                         >
                           Continue to Review
                         </Button>
@@ -966,8 +1112,8 @@ const ExcelSessionCreator: React.FC = () => {
                         <Button
                           type="button"
                           onClick={handleCreateSessions}
-                          disabled={loading}
-                          className="bg-gradient-to-r from-emerald-500 to-blue-600 hover:from-emerald-600 hover:to-blue-700 text-white shadow-lg"
+                          disabled={loading || !allRoomsAssigned}
+                          className="bg-gradient-to-r from-emerald-500 to-blue-600 hover:from-emerald-600 hover:to-blue-700 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {loading ? (
                             <>
@@ -1104,17 +1250,28 @@ const ExcelSessionCreator: React.FC = () => {
                       <div className="pt-4 border-t border-gray-700">
                         <div className="text-sm text-gray-300">
                           <div className="flex justify-between mb-2">
-                            <span>Unique Faculty:</span>
-                            <span>
-                              {new Set(parsedSessions.map((s) => s.email)).size}
+                            <span>Rooms Assigned:</span>
+                            <span
+                              className={
+                                allRoomsAssigned
+                                  ? "text-green-400"
+                                  : "text-red-400"
+                              }
+                            >
+                              {assignedRoomsCount}/{parsedSessions.length}
                             </span>
                           </div>
                           <div className="w-full bg-gray-700 rounded-full h-2">
                             <div
-                              className="bg-emerald-600 h-2 rounded-full transition-all"
+                              className={`h-2 rounded-full transition-all ${
+                                allRoomsAssigned
+                                  ? "bg-emerald-600"
+                                  : "bg-red-600"
+                              }`}
                               style={{
                                 width: `${Math.min(
-                                  (formStep / 3) * 100,
+                                  (assignedRoomsCount / parsedSessions.length) *
+                                    100,
                                   100
                                 )}%`,
                               }}
@@ -1126,43 +1283,6 @@ const ExcelSessionCreator: React.FC = () => {
                   </div>
                 </CardContent>
               </Card>
-
-              {formStep === 1 && (
-                <Card className="border-gray-700 shadow-xl bg-gray-900/80 backdrop-blur">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-lg text-white">
-                      <AlertTriangle className="h-5 w-5 text-yellow-400" />
-                      Excel Format Guide
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3 text-sm">
-                    <div className="p-3 bg-blue-900/30 rounded-lg border border-blue-800">
-                      <p className="font-medium text-blue-200">
-                        Required Columns
-                      </p>
-                      <p className="text-blue-300 text-xs">
-                        Ensure all 6 columns are present in your Excel file
-                      </p>
-                    </div>
-
-                    <div className="p-3 bg-green-900/30 rounded-lg border border-green-800">
-                      <p className="font-medium text-green-200">Date Format</p>
-                      <p className="text-green-300 text-xs">
-                        Use YYYY-MM-DD format (e.g., 2024-09-20)
-                      </p>
-                    </div>
-
-                    <div className="p-3 bg-yellow-900/30 rounded-lg border border-yellow-800">
-                      <p className="font-medium text-yellow-200">
-                        Email Validation
-                      </p>
-                      <p className="text-yellow-300 text-xs">
-                        Ensure all email addresses are valid
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
             </div>
           </div>
         </div>
