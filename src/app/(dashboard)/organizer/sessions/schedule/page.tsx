@@ -414,90 +414,90 @@ const ExcelSessionCreator: React.FC = () => {
   };
 
   // ✅ FIXED: Send bulk invitations with safe grouping
-  const handleSendInvitations = async () => {
-    if (createdSessions.length === 0) {
-      setErrorMessage("No sessions created yet. Please create sessions first.");
-      return;
-    }
+  // const handleSendInvitations = async () => {
+  //   if (createdSessions.length === 0) {
+  //     setErrorMessage("No sessions created yet. Please create sessions first.");
+  //     return;
+  //   }
 
-    setEmailSending(true);
-    setErrorMessage("");
+  //   setEmailSending(true);
+  //   setErrorMessage("");
 
-    try {
-      console.log("Sending bulk invitation emails...");
+  //   try {
+  //     console.log("Sending bulk invitation emails...");
 
-      // ✅ FIXED: Safe grouping with proper type checking
-      const sessionsByEmail: Record<string, any[]> = {};
-      createdSessions.forEach((session) => {
-        const email = session.originalEmail || session.email;
-        if (email && typeof email === "string") {
-          // ✅ Type guard
-          if (!sessionsByEmail[email]) {
-            sessionsByEmail[email] = [];
-          }
-          sessionsByEmail[email].push(session);
-        }
-      });
+  //     // ✅ FIXED: Safe grouping with proper type checking
+  //     const sessionsByEmail: Record<string, any[]> = {};
+  //     createdSessions.forEach((session) => {
+  //       const email = session.originalEmail || session.email;
+  //       if (email && typeof email === "string") {
+  //         // ✅ Type guard
+  //         if (!sessionsByEmail[email]) {
+  //           sessionsByEmail[email] = [];
+  //         }
+  //         sessionsByEmail[email].push(session);
+  //       }
+  //     });
 
-      let successfulEmails = 0;
-      const failedEmails: string[] = [];
+  //     let successfulEmails = 0;
+  //     const failedEmails: string[] = [];
 
-      // ✅ FIXED: Safe iteration with proper type checking
-      for (const email in sessionsByEmail) {
-        if (sessionsByEmail.hasOwnProperty(email)) {
-          // ✅ Safe property check
-          const sessions = sessionsByEmail[email];
+  //     // ✅ FIXED: Safe iteration with proper type checking
+  //     for (const email in sessionsByEmail) {
+  //       if (sessionsByEmail.hasOwnProperty(email)) {
+  //         // ✅ Safe property check
+  //         const sessions = sessionsByEmail[email];
 
-          try {
-            const emailResponse = await fetch("/api/sessions", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                email,
-                sessions,
-                eventId: selectedEventId,
-                facultyName: sessions?.[0]?.facultyName ?? "Faculty Member",
-              }),
-            });
+  //         try {
+  //           const emailResponse = await fetch("/api/sessions", {
+  //             method: "POST",
+  //             headers: { "Content-Type": "application/json" },
+  //             body: JSON.stringify({
+  //               email,
+  //               sessions,
+  //               eventId: selectedEventId,
+  //               facultyName: sessions?.[0]?.facultyName ?? "Faculty Member",
+  //             }),
+  //           });
 
-            if (emailResponse.ok) {
-              successfulEmails++;
-              console.log(`Bulk invitation sent to: ${email}`);
-            } else {
-              const emailError = await emailResponse.json();
-              console.warn(`Email failed for ${email}:`, emailError);
-              failedEmails.push(email);
-            }
-          } catch (emailError) {
-            console.warn(`Email error for ${email}:`, emailError);
-            failedEmails.push(email);
-          }
-        }
-      }
+  //           if (emailResponse.ok) {
+  //             successfulEmails++;
+  //             console.log(`Bulk invitation sent to: ${email}`);
+  //           } else {
+  //             const emailError = await emailResponse.json();
+  //             console.warn(`Email failed for ${email}:`, emailError);
+  //             failedEmails.push(email);
+  //           }
+  //         } catch (emailError) {
+  //           console.warn(`Email error for ${email}:`, emailError);
+  //           failedEmails.push(email);
+  //         }
+  //       }
+  //     }
 
-      const totalFaculty = Object.keys(sessionsByEmail).length;
+  //     const totalFaculty = Object.keys(sessionsByEmail).length;
 
-      if (successfulEmails === totalFaculty) {
-        setSuccessMessage(
-          `🎉 All invitation emails sent successfully to ${successfulEmails} faculty members!`
-        );
-      } else {
-        setSuccessMessage(
-          `Invitation emails sent to ${successfulEmails}/${totalFaculty} faculty members. ${failedEmails.length} failed.`
-        );
-        if (failedEmails.length > 0) {
-          setErrorMessage(
-            `Failed to send emails to: ${failedEmails.join(", ")}`
-          );
-        }
-      }
-    } catch (error) {
-      console.error("Error sending bulk invitations:", error);
-      setErrorMessage("Failed to send invitation emails. Please try again.");
-    } finally {
-      setEmailSending(false);
-    }
-  };
+  //     if (successfulEmails === totalFaculty) {
+  //       setSuccessMessage(
+  //         `🎉 All invitation emails sent successfully to ${successfulEmails} faculty members!`
+  //       );
+  //     } else {
+  //       setSuccessMessage(
+  //         `Invitation emails sent to ${successfulEmails}/${totalFaculty} faculty members. ${failedEmails.length} failed.`
+  //       );
+  //       if (failedEmails.length > 0) {
+  //         setErrorMessage(
+  //           `Failed to send emails to: ${failedEmails.join(", ")}`
+  //         );
+  //       }
+  //     }
+  //   } catch (error) {
+  //     console.error("Error sending bulk invitations:", error);
+  //     setErrorMessage("Failed to send invitation emails. Please try again.");
+  //   } finally {
+  //     setEmailSending(false);
+  //   }
+  // };
 
   // Download Excel template
   const downloadTemplate = () => {
@@ -1141,26 +1141,123 @@ const ExcelSessionCreator: React.FC = () => {
                       )}
 
                       {formStep === 3 && (
-                        <Button
-                          type="button"
-                          onClick={handleSendInvitations}
-                          disabled={
-                            emailSending || createdSessions.length === 0
-                          }
-                          className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white shadow-lg px-8"
-                        >
-                          {emailSending ? (
-                            <>
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                              Sending Invitations...
-                            </>
-                          ) : (
-                            <>
-                              <Send className="h-4 w-4 mr-2" />
-                              Send All Invitations
-                            </>
-                          )}
-                        </Button>
+                        <div className="space-y-6">
+                          {/* Keep the invitation summary */}
+                          <div className="bg-gradient-to-br from-gray-800 to-gray-800/50 rounded-xl p-6 border border-gray-700">
+                            <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                              <CheckCircle className="h-5 w-5 text-green-400" />
+                              Sessions Created Successfully!
+                            </h3>
+
+                            <div className="grid md:grid-cols-2 gap-4 text-sm mb-6">
+                              <div>
+                                <span className="font-medium text-gray-300">
+                                  Event:
+                                </span>
+                                <p className="text-white">
+                                  {
+                                    events.find((e) => e.id === selectedEventId)
+                                      ?.name
+                                  }
+                                </p>
+                              </div>
+                              <div>
+                                <span className="font-medium text-gray-300">
+                                  Total Sessions:
+                                </span>
+                                <p className="text-white">
+                                  {createdSessions.length}
+                                </p>
+                              </div>
+                              <div>
+                                <span className="font-medium text-gray-300">
+                                  Unique Faculty:
+                                </span>
+                                <p className="text-white">
+                                  {
+                                    new Set(
+                                      createdSessions.map(
+                                        (s) => s.originalEmail || s.email
+                                      )
+                                    ).size
+                                  }
+                                </p>
+                              </div>
+                              <div>
+                                <span className="font-medium text-gray-300">
+                                  Status:
+                                </span>
+                                <p className="text-emerald-300">
+                                  Sessions Created & Stored ✓
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Faculty List */}
+                            <div className="space-y-3">
+                              <h4 className="font-medium text-gray-300">
+                                Faculty List:
+                              </h4>
+                              <div className="max-h-40 overflow-y-auto space-y-2">
+                                {Array.from(
+                                  new Set(
+                                    createdSessions.map(
+                                      (s) => s.originalEmail || s.email
+                                    )
+                                  )
+                                ).map((email) => {
+                                  const facultySessions =
+                                    createdSessions.filter(
+                                      (s) =>
+                                        (s.originalEmail || s.email) === email
+                                    );
+                                  return (
+                                    <div
+                                      key={email}
+                                      className="flex justify-between items-center text-sm bg-gray-800/50 rounded p-2"
+                                    >
+                                      <div>
+                                        <span className="text-white">
+                                          {facultySessions[0]?.facultyName}
+                                        </span>
+                                        <span className="text-gray-400 ml-2">
+                                          ({email})
+                                        </span>
+                                      </div>
+                                      <Badge
+                                        variant="secondary"
+                                        className="text-xs"
+                                      >
+                                        {facultySessions.length} sessions
+                                      </Badge>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          <Alert className="border-green-600 bg-green-900/20">
+                            <CheckCircle className="h-4 w-4 text-green-400" />
+                            <AlertDescription className="text-green-200">
+                              <strong>
+                                All sessions have been created and stored
+                                successfully!
+                              </strong>
+                              <br />
+                              {createdSessions.length} sessions have been
+                              created for{" "}
+                              {
+                                new Set(
+                                  createdSessions.map(
+                                    (s) => s.originalEmail || s.email
+                                  )
+                                ).size
+                              }{" "}
+                              faculty members.
+                            </AlertDescription>
+                          </Alert>
+                        </div>
                       )}
                     </div>
                   </div>
