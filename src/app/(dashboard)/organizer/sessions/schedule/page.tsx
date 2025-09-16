@@ -884,6 +884,7 @@ const ExcelSessionCreator: React.FC = () => {
                                     {session.place}
                                   </span>
                                 </div>
+                                {/* ✅ FIXED: Dark themed room dropdown */}
                                 <div className="md:col-span-2">
                                   <label className="text-gray-400 block mb-1">
                                     Room: *
@@ -897,19 +898,29 @@ const ExcelSessionCreator: React.FC = () => {
                                         e.target.value
                                       )
                                     }
-                                    className={`w-full p-2 text-sm rounded bg-gray-700 text-white border ${
+                                    className={`w-full p-3 text-sm rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
                                       !session.roomId ||
                                       session.roomId.trim() === "" ||
                                       validationErrors[`${session.id}-room`]
-                                        ? "border-red-500 bg-red-900/20"
-                                        : "border-gray-600"
+                                        ? "bg-red-900/20 border-2 border-red-500 text-red-200"
+                                        : "bg-gray-800 border-2 border-gray-600 text-white hover:border-gray-500 focus:border-emerald-400"
                                     }`}
+                                    style={{
+                                      colorScheme: "dark", // ✅ Forces dark theme for dropdown options
+                                    }}
                                   >
-                                    <option value="">
+                                    <option
+                                      value=""
+                                      className="bg-gray-800 text-gray-400"
+                                    >
                                       ⚠️ Select Room (Required)
                                     </option>
                                     {rooms.map((room) => (
-                                      <option key={room.id} value={room.id}>
+                                      <option
+                                        key={room.id}
+                                        value={room.id}
+                                        className="bg-gray-800 text-white py-2"
+                                      >
                                         {room.name}
                                       </option>
                                     ))}
